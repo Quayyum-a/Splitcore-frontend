@@ -318,3 +318,51 @@ curl -s -o /dev/null -w '%{http_code}\n' $BASE/venues              # expect 401
 | `/dashboard/qr-codes` | `GET/POST/DELETE /qr-codes`, `POST /qr-codes/{id}/regenerate` | ✅ real |
 | `/dashboard/split-rules` | `GET /split-rules/venue/{id}`, `/active`, `POST /split-rules` | ✅ real |
 | `/dashboard/venues` | `GET/PATCH/DELETE /venues`, `GET /venues/{id}` | ✅ real |
+
+---
+
+## 7. Paystack callback — where the guest lands after paying
+
+The frontend does **not** control Paystack's `callback_url`. The backend sets it when it
+initializes the transaction, from its own **`PAYMENT_CALLBACK_URL`** environment variable, and
+appends `?reference=<our externalReference>` to it. If the variable is unset or not a valid URL,
+the backend omits `callbackUrl` entirely and Paystack falls back to its own default redirect.
+
+**Consequence:** until `PAYMENT_CALLBACK_URL` points at this frontend, a guest completes payment
+successfully but never sees the confirmation screen. The payment still happens and is still
+recorded — only the confirmation is lost.
+
+> **Second action required by a human, in the Render dashboard** → service `splitcore-api` →
+> Environment:
+>
+> | Key | Value |
+> |---|---|
+> | `PAYMENT_CALLBACK_URL` | `https://<frontend-domain>/pay/confirming` |
+>
+> The frontend route reads `reference` from the query string, and falls back to a short-lived
+> httpOnly cookie set at payment initialization if the query string is lost.
+
+Together with §4.3, the **complete** set of backend environment changes this frontend needs:
+
+| Key | Value | Why |
+|---|---|---|
+| `ALLOWED_ORIGINS` | `https://<frontend-domain>` | Recommended. Not strictly required — see §4.4. |
+| `PAYMENT_CALLBACK_URL` | `https://<frontend-domain>/pay/confirming` | **Required** for guests to see the confirmation screen. |
+
+No backend source file was modified.
+
+---
+
+## 8. Open questions for the next session
+
+1. **`POST /auth/login`'s 200 response shape is still unverified** (§3.1). It needs one real set of
+   venue-admin credentials to observe. Until then `lib/api/auth.ts` parses defensively.
+2. **410 Gone was never triggered live** — it is declared in the OpenAPI document and handled
+   distinctly in the UI, but confirming it needs a known-deactivated token.
+3. **No end-to-end payment has been run** through real Paystack checkout, because that needs a real
+   QR token from an authenticated venue with an active split rule.
+4. **Per-venue tip min/max does not exist.** The guest screen uses the backend's own documented
+   `InitializePaymentDto` bounds (₦100 – ₦10,000,000) rather than inventing venue-specific limits.
+   If venues should be able to set their own, that is new backend work.
+5. **Spectacle mode** has no supporting flag or endpoint, so the "Your tip is now showing on the
+   venue screen" line is not rendered. Building it would mean faking it.
