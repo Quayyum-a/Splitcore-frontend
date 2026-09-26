@@ -576,3 +576,108 @@ cross-venue page, real entertainer counts, and the legacy split-rule path.
    automation. Structure, copy, tokens and zero gradients are verified from rendered HTML.
 4. **Governance is unverified against the real backend** because it isn't deployed. It is
    verified against the contract; those are different things.
+
+---
+---
+
+# Re-audit — 2026-09-26 (third pass)
+
+Run to check whether the Phase 6/7 backend (entertainer portal, dashboard aggregates) had
+shipped. It had not — but the check surfaced a production outage instead.
+
+## A. 🚨 Tipping is down in production
+
+```bash
+curl -s .../t/ffb6a15bb6469ff3d421947125c87a2f          # 200 — QR resolves fine
+curl -s -X POST .../payments/initialize \
+  -d '{"sessionId":"…","amountKobo":10000}'             # 500 InternalServerError
+```
+
+**No guest can tip.** The QR code resolves, the tipping screen renders, and the payment fails.
+
+### Cause
+
+Split-rule governance **code** is deployed — the live OpenAPI now carries `/platform/settings`,
+`/split-rules/override`, `/split-rules/{id}/respond/{token}` and `/split-rules/{id}/audit`, and
+`CreateSplitRuleDto` is the governed four-field shape. The **database migration is not applied**:
+
+```bash
+GET /platform/settings                  → 500
+GET /split-rules/venue/{id}             → 500
+GET /split-rules/venue/{id}/active      → 500
+POST /payments/initialize               → 500   (it needs the active rule)
+```
+
+`prisma/migrations/20260926120000_split_rule_governance` is committed and pushed, but Render
+never runs it:
+
+```yaml
+buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+startCommand: npm run start:prod        # = node dist/main
+```
+
+`prisma generate` builds the client; it does not touch the database. Nothing in either command
+runs `prisma migrate deploy`, so the new columns and the `platform_settings` table don't exist
+and every split-rule query throws.
+
+### Fix (backend / ops, not this repo)
+
+Apply the migration against the production database:
+
+```bash
+npx prisma migrate deploy        # against DATABASE_URL for the Render Postgres
+```
+
+Then add it to the deploy so this can't recur — a Render **pre-deploy command**, or fold it into
+the start command. Note the migration makes `split_rules.effective_from` nullable and adds
+`status`/`origin` with defaults, so existing rows survive it.
+
+## B. Phase 6/7 has not shipped
+
+Every candidate endpoint returns 404 against the live API, probed with a `PLATFORM_ADMIN` token:
+
+`/venues/{id}/overview` · `/venues/{id}/dashboard` · `/venues/{id}/stats` ·
+`/venues/{id}/transactions` · `/venues/{id}/payouts` · `/entertainers/{id}/overview` ·
+`/entertainers/{id}/dashboard` · `/entertainers/{id}/transactions` · `/entertainers/{id}/payouts` ·
+`/entertainers/{id}/kyc` · `/kyc/status` · `/banks` · `/banks/resolve` · `/payouts` ·
+`/transactions` · `/auth/entertainer/request-link` · `/entertainer/me`
+
+The work exists locally as `0858f7c feat: entertainer KYC onboarding, entertainer access, and
+dashboard aggregates`, but the backend repo is **3 commits ahead of `origin/main` and unpushed**
+— the same thing that happened with governance last round.
+
+**No entertainer portal or dashboard-aggregate UI was built**, per the instruction to stop rather
+than build against endpoints that don't exist. Venue money tiles stay "Not yet available",
+truthfully.
+
+## C. Two frontend defects this exposed, both fixed
+
+### 1. The capability probe treated "broken" as "old"
+
+`getPlatformSettings` returned `PlatformSettings | null`, and the page wrapped it in
+`.catch(() => null)`. A 500 therefore looked identical to a 404, so the dashboard silently
+rendered the **legacy** split form — which submits `platformBps`, which the governance API
+rejects with 400. A venue operator got a form that could only fail, with nothing saying why.
+
+Now a three-way probe — `available` / `absent` / `broken` — and the failure is no longer
+swallowed. A broken API shows one accurate error, names the likely cause, and renders **no
+form**, because neither form could succeed.
+
+It also stopped claiming "this venue has no agreed split, so it can't accept tips" when the
+truth was that the active rule could not be *read*. Verified against the live 500.
+
+### 2. Guests saw the backend's own error string
+
+A 5xx from `/payments/initialize` fell through to `error.message`, putting **"An unexpected
+error occurred"** in front of someone standing in a club. True, and useless. A server fault now
+reads: *"Tips aren't going through right now. Please let the venue know — this is on us, not
+you."* and is marked non-retryable, because retrying will not help.
+
+## D. Still open
+
+1. **Apply the migration** (§A) — tipping stays down until then.
+2. **Push the backend** (§B) — Phase 6/7 is written but not deployed.
+3. **Governance remains unverified against a healthy backend.** It is verified against the
+   contract; it has never once run against a working database.
+4. No end-to-end payment through live Paystack; 410 Gone still untriggered; the guest tipping
+   screen still unreviewed visually.

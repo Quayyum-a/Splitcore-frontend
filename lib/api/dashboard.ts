@@ -109,19 +109,39 @@ export const getSplitRuleAudit = (token: string, splitRuleId: string) =>
 /**
  * Reads the platform fee, and doubles as this app's capability probe.
  *
- * `null` means the endpoint is not there — the deployed backend predates split-rule
- * governance. Every governance surface keys off this one call rather than each
- * guessing separately, so the dashboard degrades in one place instead of erroring
- * in six. Verified live on 2026-09-26: the deployed API returns 404 here.
+ * Three outcomes, deliberately distinct:
+ *
+ *   available — governance API is live and healthy.
+ *   absent    — 404. The deployed backend predates split-rule governance.
+ *   broken    — anything else. The endpoint exists but is failing.
+ *
+ * `absent` and `broken` must never be conflated. An earlier version collapsed
+ * both into null, which meant a 500 silently rendered the legacy split form —
+ * and that form submits `platformBps`, which the governance API rejects with a
+ * 400. So a broken backend produced a form that could only ever fail, with
+ * nothing on screen to say why. Observed in production on 2026-09-26, when the
+ * governance code shipped without its database migration and every split-rule
+ * query returned 500.
+ *
+ * Every governance surface keys off this one call, so the dashboard degrades in
+ * one place instead of erroring in six.
  */
+export type PlatformSettingsProbe =
+  | { kind: "available"; settings: PlatformSettings }
+  | { kind: "absent" }
+  | { kind: "broken"; status: number; message: string };
+
 export async function getPlatformSettings(
   token: string,
-): Promise<PlatformSettings | null> {
+): Promise<PlatformSettingsProbe> {
   try {
-    return await apiFetch<PlatformSettings>("/platform/settings", { token });
+    return { kind: "available", settings: await apiFetch<PlatformSettings>("/platform/settings", { token }) };
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null;
-    throw error;
+    if (error instanceof ApiError) {
+      if (error.status === 404) return { kind: "absent" };
+      return { kind: "broken", status: error.status, message: error.message };
+    }
+    return { kind: "broken", status: 0, message: "Could not reach the Splitcore API." };
   }
 }
 
