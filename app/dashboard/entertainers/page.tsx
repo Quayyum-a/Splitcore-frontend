@@ -24,12 +24,13 @@ export const metadata: Metadata = { title: "Entertainers" };
 export default async function EntertainersPage() {
   const { token } = await requireSession();
 
+  // null means the call failed; [] means it succeeded and there is nothing.
   const [entertainers, venues] = await Promise.all([
     listEntertainers(token).catch(() => null),
-    listVenues(token).catch(() => []),
+    listVenues(token).catch(() => null),
   ]);
 
-  const venuesById = new Map(venues.map((venue) => [venue.id, venue]));
+  const venuesById = new Map((venues ?? []).map((venue) => [venue.id, venue]));
 
   return (
     <>
@@ -41,7 +42,13 @@ export default async function EntertainersPage() {
       <div className="mb-6">
         <Card>
           <CardHeader title="Add an entertainer" />
-          <EntertainerCreateForm venues={venues} />
+          {venues === null ? (
+            <div className="p-5">
+              <ErrorNotice message="Couldn't load venues, so a new entertainer can't be linked to one right now. Reload in a moment." />
+            </div>
+          ) : (
+            <EntertainerCreateForm venues={venues} />
+          )}
         </Card>
       </div>
 

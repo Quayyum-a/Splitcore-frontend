@@ -28,6 +28,39 @@ covered by a decode test: generated PNGs are decoded and asserted to contain the
 
 ---
 
+## Backend API
+
+- **Swagger UI:** https://splitcore-api.onrender.com/api/docs — verified rendering
+  (2026-09-26). Browse and try every endpoint there.
+- **OpenAPI JSON:** https://splitcore-api.onrender.com/api/docs-json — mounted at
+  `/api/docs-json`, *not* `/api-json` or `/docs-json`. A snapshot lives at
+  [`docs/splitcore-openapi.snapshot.json`](docs/splitcore-openapi.snapshot.json).
+
+---
+
+## Brand
+
+The gold "S" is the locked mark. Source art is in
+[`design/reference/`](design/reference/); everything in `public/` is generated from it
+(`favicon.ico` + PNG favicons, `apple-touch-icon.png`, maskable manifest icons, the OG
+card, and the header mark), lifted off its navy plate into straight alpha so it sits on
+any surface.
+
+The wordmark is set as **live type**, not shipped as art — the reference lockup renders
+it in cream, which would vanish on the light admin surface.
+
+| Token | Value | Where it comes from |
+|---|---|---|
+| `--color-ink-950` | `#08080a` | canonical dark ground, matches `theme-color` |
+| `--color-gold` | `#c89e5a` | median luminance of the mark's gold pixels |
+| `--color-gold-bright` | `#efc568` | the mark's highlight |
+| `--color-cream` | `#f2efe9` | the wordmark's off-white |
+
+The gold is an antique bronze sampled from the art, not a bright amber. Type is
+**Outfit** throughout — geometric and wide-set, built like the wordmark.
+
+---
+
 ## `docs/api-audit.md` is the source of truth
 
 [`docs/api-audit.md`](docs/api-audit.md) records what the live backend **actually** supported on the
@@ -51,11 +84,35 @@ what was deployed.
 | Venue "Total Tips" / "Transactions" / "Pending Payouts" | ⛔ No endpoint exists — shown as *Not yet available* |
 | Transaction history table | ⛔ No endpoint exists — *Coming soon* |
 | Payouts table | ⛔ No endpoint exists — *Coming soon* |
+| Platform-admin cross-venue management | ✅ Real — gated on the `role` claim, verified with two live accounts |
+| Split rules: platform fee locked, linked venue/entertainer shares | ✅ Real |
+| Entertainer approval: propose → consent link → accept/reject | ✅ Built — **switches on by itself** once the backend ships (see below) |
+| Platform fee editor + admin override | ✅ Built, platform admin only |
 | Spectacle mode | ⛔ No endpoint exists — not built |
 
 Nothing in the dashboard computes an aggregate client-side from partial data. A number is either
 fetched from a confirmed endpoint or it is absent, because the product's pitch to venues is
 numbers they can trust.
+
+---
+
+## Split-rule governance, and the capability probe
+
+A split isn't real until the entertainer agrees to it. The dashboard proposes venue and
+entertainer shares; the platform fee is server-set and read-only; the proposal sits in
+**Awaiting approval**, dividing no money, until the entertainer accepts it via a consent
+link at `/split-rules/[id]/respond/[token]` — no login, the token is the authorization.
+
+**The backend for this is committed but not yet deployed.** Rather than shipping a UI that
+errors until someone remembers to redeploy, the dashboard probes `GET /platform/settings`
+once per render:
+
+| Probe | Mode |
+|---|---|
+| **200** | Governance. Propose/approve, locked platform fee, real status badges. |
+| **404** | Legacy. All three shares are client input, splits take effect immediately — and the page **says so** rather than implying otherwise. |
+
+Nothing needs changing here when the backend ships. It switches on by itself.
 
 ---
 
@@ -118,8 +175,8 @@ Set on the Netlify site:
 
 | Key | Value | Why |
 |---|---|---|
-| `PAYMENT_CALLBACK_URL` | `https://<frontend-domain>/pay/confirming` | **Required.** Without it Paystack redirects elsewhere and the guest never sees the confirmation screen. The payment still completes. |
-| `ALLOWED_ORIGINS` | `https://<frontend-domain>` | Recommended, not required — see audit §4.4. |
+| `FRONTEND_URL` | `https://splitcore-app.netlify.app` | **Required.** The backend returns guests to `{FRONTEND_URL}/t/{token}?reference=…` after Paystack. Takes precedence over the older `PAYMENT_CALLBACK_URL`. |
+| `ALLOWED_ORIGINS` | `https://splitcore-app.netlify.app` | Already set — CORS was verified working on 2026-09-26. |
 
 ---
 
@@ -127,10 +184,14 @@ Set on the Netlify site:
 
 ```
 app/
-  t/[token]/            Guest tipping screen — the QR landing page
-  pay/confirming/       Post-checkout status, polls until the payment settles
+  t/[token]/            Guest tipping screen, checkout, AND the Paystack return
+                        (?reference=… switches it into the confirming state)
+  pay/confirming/       Legacy return route, kept for older backend settings
+  split-rules/[id]/respond/[token]/
+                        Entertainer consent — public, no login, dark-themed
   login/                Venue admin sign-in
-  dashboard/            Overview, QR codes, entertainers, split rules, (transactions, payouts)
+  dashboard/            Overview, QR codes, entertainers, split rules,
+                        venues (platform admin only), (transactions, payouts)
   api/
     qr/[token]/png/     Scannable PNG encoding this site's /t/ URL
     payments/[reference]/status/   Server-side proxy the confirmation screen polls

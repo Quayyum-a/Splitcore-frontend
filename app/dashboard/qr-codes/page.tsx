@@ -21,15 +21,17 @@ export const metadata: Metadata = { title: "QR codes" };
 export default async function QrCodesPage() {
   const { token } = await requireSession();
 
+  // null means the call failed; [] means it succeeded and there is nothing.
+  // Collapsing those two would render "no venues yet" during an outage.
   const [qrCodes, venues, entertainers] = await Promise.all([
     listQrCodes(token).catch(() => null),
-    listVenues(token).catch(() => []),
-    listEntertainers(token).catch(() => []),
+    listVenues(token).catch(() => null),
+    listEntertainers(token).catch(() => null),
   ]);
 
   const appUrl = getAppUrl();
-  const byId = new Map(entertainers.map((entertainer) => [entertainer.id, entertainer]));
-  const venuesById = new Map(venues.map((venue) => [venue.id, venue]));
+  const byId = new Map((entertainers ?? []).map((e) => [e.id, e]));
+  const venuesById = new Map((venues ?? []).map((venue) => [venue.id, venue]));
 
   const sorted = qrCodes
     ? [...qrCodes].sort((a, b) => {
@@ -48,7 +50,13 @@ export default async function QrCodesPage() {
       <div className="mb-6">
         <Card>
           <CardHeader title="Generate a code" />
-          <QrCreateForm venues={venues} entertainers={entertainers} />
+          {venues === null || entertainers === null ? (
+            <div className="p-5">
+              <ErrorNotice message="Couldn't load venues and entertainers, so a code can't be generated right now. Reload in a moment." />
+            </div>
+          ) : (
+            <QrCreateForm venues={venues} entertainers={entertainers} />
+          )}
         </Card>
       </div>
 

@@ -1,36 +1,41 @@
 @import "tailwindcss";
 
 @theme {
-  /* Guest surface — deep, warm-tinted near-black. Reads as "dim club", not
-     "generic dark mode grey", and keeps OLED phones cheap to light up. */
+  /* ---- Surfaces -------------------------------------------------------
+     A single solid dark ground, not a gradient. #08080a is the canonical
+     value, already shipped as the site's theme-color; everything else is a
+     minimal lift off it so panels read as raised without turning the screen
+     into a stack of greys. */
   --color-ink-950: #08080a;
-  --color-ink-900: #0e0e12;
-  --color-ink-850: #14141a;
-  --color-ink-800: #1c1c24;
-  --color-ink-700: #2a2a35;
-  --color-ink-600: #3d3d4b;
-  --color-ink-400: #8b8b9c;
-  --color-ink-300: #b4b4c4;
-  --color-ink-100: #ecebf2;
+  --color-ink-900: #101013;
+  --color-ink-850: #16161a;
+  --color-ink-800: #1b1b20;
+  --color-ink-700: #26262d;
+  --color-ink-600: #34343d;
+  --color-ink-400: #7c7c88;
+  --color-ink-300: #a6a6b2;
 
-  /* Accent — naira gold. Money, warmth, stage light. */
-  --color-gold-400: #ffc94d;
-  --color-gold-500: #f7b52c;
-  --color-gold-600: #d99614;
+  /* ---- Brand ----------------------------------------------------------
+     Sampled from the locked logo art rather than picked by eye: these are the
+     median and 98th-percentile luminance of the mark's gold pixels, plus the
+     wordmark's off-white. The gold is an antique bronze, not a bright amber —
+     that restraint is what stops a dark screen reading as generic. */
+  --color-gold: #c89e5a;
+  --color-gold-bright: #efc568;
+  --color-gold-deep: #a97731;
+  --color-cream: #f2efe9;
 
-  --color-success-400: #43d9a3;
-  --color-success-600: #0f9f6e;
-  --color-danger-400: #ff6b6b;
-  --color-danger-600: #d93636;
+  /* Deep navy from the logo plate. Used only where the mark needs its own
+     ground (app tiles, the scan card), never as a page background. */
+  --color-plate: #161429;
 
-  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-success: #4ad4a2;
+  --color-danger: #ff6b6b;
 
-  --radius-xl2: 1.25rem;
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
 }
 
-/* The app ships its own explicit palette per surface rather than following the
-   OS. The guest screen is dark by product decision (spec §4), not by preference. */
 :root {
   color-scheme: dark;
 }
@@ -42,19 +47,30 @@ body {
 
 body {
   background-color: var(--color-ink-950);
-  color: var(--color-ink-100);
+  color: var(--color-cream);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* Stop iOS Safari inflating text in the one-handed landscape grab. */
   -webkit-text-size-adjust: 100%;
 }
 
-/* The dashboard is a separate visual world: sober financial-infrastructure
-   software, light surface, dense tables. */
+/* The admin dashboard is a different product to the guest screen: sober,
+   light, dense. Scoped by attribute so the two palettes never bleed. */
 body:has([data-surface="admin"]) {
   background-color: #f6f7f9;
   color: #0f172a;
   color-scheme: light;
+}
+
+/* Money is compared down columns and across screens — always tabular. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -67,23 +83,8 @@ body:has([data-surface="admin"]) {
   }
 }
 
-/* Large, unambiguous focus ring — this is money software. */
-:focus-visible {
-  outline: 2px solid var(--color-gold-500);
-  outline-offset: 2px;
-}
-
 @keyframes sc-pulse-ring {
-  0% { transform: scale(0.92); opacity: 0.7; }
-  70% { transform: scale(1.35); opacity: 0; }
-  100% { transform: scale(1.35); opacity: 0; }
-}
-
-@keyframes sc-rise {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.sc-rise {
-  animation: sc-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  0% { transform: scale(0.9); opacity: 0.65; }
+  70% { transform: scale(1.4); opacity: 0; }
+  100% { transform: scale(1.4); opacity: 0; }
 }

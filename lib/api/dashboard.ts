@@ -1,7 +1,15 @@
 import "server-only";
 
-import { apiFetch } from "./client";
-import type { Entertainer, QrCode, SplitRule, Venue } from "./types";
+import { apiFetch, ApiError } from "./client";
+import type {
+  Entertainer,
+  PlatformSettings,
+  QrCode,
+  SplitRule,
+  SplitRuleAuditEvent,
+  SplitRuleProposal,
+  Venue,
+} from "./types";
 
 /**
  * Authenticated dashboard resources. Every function here maps to an endpoint
@@ -20,6 +28,16 @@ export const getVenue = (token: string, venueId: string) =>
 
 export const updateVenue = (token: string, venueId: string, body: Partial<Venue>) =>
   apiFetch<Venue>(`/venues/${venueId}`, { method: "PATCH", token, body });
+
+/** Platform-admin only; the backend rejects a VENUE_ADMIN with 403. */
+export const createVenue = (
+  token: string,
+  body: { name: string; slug: string; location: string; logoUrl?: string },
+) => apiFetch<Venue>("/venues", { method: "POST", token, body });
+
+/** Soft delete. */
+export const deactivateVenue = (token: string, venueId: string) =>
+  apiFetch<void>(`/venues/${venueId}`, { method: "DELETE", token });
 
 export const listEntertainers = (token: string) =>
   apiFetch<Entertainer[]>("/entertainers", { token });
@@ -85,7 +103,71 @@ export const listSplitRules = (token: string, venueId: string) =>
 export const getActiveSplitRule = (token: string, venueId: string) =>
   apiFetch<SplitRule>(`/split-rules/venue/${venueId}/active`, { token });
 
-export const createSplitRule = (
+export const getSplitRuleAudit = (token: string, splitRuleId: string) =>
+  apiFetch<SplitRuleAuditEvent[]>(`/split-rules/${splitRuleId}/audit`, { token });
+
+/**
+ * Reads the platform fee, and doubles as this app's capability probe.
+ *
+ * `null` means the endpoint is not there — the deployed backend predates split-rule
+ * governance. Every governance surface keys off this one call rather than each
+ * guessing separately, so the dashboard degrades in one place instead of erroring
+ * in six. Verified live on 2026-09-26: the deployed API returns 404 here.
+ */
+export async function getPlatformSettings(
+  token: string,
+): Promise<PlatformSettings | null> {
+  try {
+    return await apiFetch<PlatformSettings>("/platform/settings", { token });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** PLATFORM_ADMIN only. Rules already in force keep the fee they were agreed under. */
+export const updatePlatformSettings = (token: string, platformFeeBps: number) =>
+  apiFetch<PlatformSettings>("/platform/settings", {
+    method: "PATCH",
+    token,
+    body: { platformFeeBps },
+  });
+
+/**
+ * Governance API: proposes a split and returns a one-time consent link.
+ *
+ * The rule is created PENDING_ENTERTAINER_APPROVAL and divides no money until the
+ * entertainer accepts. `platformBps` is deliberately absent — sending it is a 400,
+ * because the platform's cut is server-side only.
+ */
+export const proposeSplitRule = (
+  token: string,
+  body: {
+    venueId: string;
+    entertainerId: string;
+    entertainerBps: number;
+    venueBps: number;
+  },
+) => apiFetch<SplitRuleProposal>("/split-rules", { method: "POST", token, body });
+
+/** PLATFORM_ADMIN only. Bypasses consent, stamped ADMIN_OVERRIDE in the audit trail. */
+export const overrideSplitRule = (
+  token: string,
+  body: {
+    venueId: string;
+    entertainerBps: number;
+    venueBps: number;
+    platformBps: number;
+    reason: string;
+  },
+) => apiFetch<SplitRule>("/split-rules/override", { method: "POST", token, body });
+
+/**
+ * LEGACY split-rule creation, for a backend without governance. All three shares
+ * come from the client and the rule takes effect immediately. Used only when
+ * getPlatformSettings() returned null.
+ */
+export const createSplitRuleLegacy = (
   token: string,
   body: {
     venueId: string;

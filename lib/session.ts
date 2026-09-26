@@ -105,3 +105,21 @@ export async function requireSession(): Promise<Session> {
   if (!session) throw new Error("UNAUTHENTICATED");
   return session;
 }
+
+export async function isPlatformAdmin(): Promise<boolean> {
+  return (await getSession())?.user.role === "PLATFORM_ADMIN";
+}
+
+/**
+ * Platform-admin session or throw.
+ *
+ * This gate decides what we bother rendering and calling — it is not the
+ * security boundary. The role is a claim inside a JWT the backend signed, and
+ * every venue mutation is authorised again server-side, so forging it yields a
+ * 403 rather than access.
+ */
+export async function requirePlatformAdmin(): Promise<Session> {
+  const session = await requireSession();
+  if (session.user.role !== "PLATFORM_ADMIN") throw new Error("FORBIDDEN");
+  return session;
+}
