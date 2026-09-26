@@ -84,14 +84,35 @@ what was deployed.
 | Venue "Total Tips" / "Transactions" / "Pending Payouts" | ⛔ No endpoint exists — shown as *Not yet available* |
 | Transaction history table | ⛔ No endpoint exists — *Coming soon* |
 | Payouts table | ⛔ No endpoint exists — *Coming soon* |
-| Platform-admin cross-venue management | ✅ Real — gated on the `role` claim |
+| Platform-admin cross-venue management | ✅ Real — gated on the `role` claim, verified with two live accounts |
 | Split rules: platform fee locked, linked venue/entertainer shares | ✅ Real |
-| Entertainer approval of a split (pending / accept / reject) | ⛔ Backend hasn't shipped it — not built |
+| Entertainer approval: propose → consent link → accept/reject | ✅ Built — **switches on by itself** once the backend ships (see below) |
+| Platform fee editor + admin override | ✅ Built, platform admin only |
 | Spectacle mode | ⛔ No endpoint exists — not built |
 
 Nothing in the dashboard computes an aggregate client-side from partial data. A number is either
 fetched from a confirmed endpoint or it is absent, because the product's pitch to venues is
 numbers they can trust.
+
+---
+
+## Split-rule governance, and the capability probe
+
+A split isn't real until the entertainer agrees to it. The dashboard proposes venue and
+entertainer shares; the platform fee is server-set and read-only; the proposal sits in
+**Awaiting approval**, dividing no money, until the entertainer accepts it via a consent
+link at `/split-rules/[id]/respond/[token]` — no login, the token is the authorization.
+
+**The backend for this is committed but not yet deployed.** Rather than shipping a UI that
+errors until someone remembers to redeploy, the dashboard probes `GET /platform/settings`
+once per render:
+
+| Probe | Mode |
+|---|---|
+| **200** | Governance. Propose/approve, locked platform fee, real status badges. |
+| **404** | Legacy. All three shares are client input, splits take effect immediately — and the page **says so** rather than implying otherwise. |
+
+Nothing needs changing here when the backend ships. It switches on by itself.
 
 ---
 
@@ -166,6 +187,8 @@ app/
   t/[token]/            Guest tipping screen, checkout, AND the Paystack return
                         (?reference=… switches it into the confirming state)
   pay/confirming/       Legacy return route, kept for older backend settings
+  split-rules/[id]/respond/[token]/
+                        Entertainer consent — public, no login, dark-themed
   login/                Venue admin sign-in
   dashboard/            Overview, QR codes, entertainers, split rules,
                         venues (platform admin only), (transactions, payouts)

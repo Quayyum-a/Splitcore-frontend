@@ -118,17 +118,93 @@ export interface QrCode {
   entertainer?: Entertainer;
 }
 
-/** Shares are basis points: 10000 = 100%. Rules are append-only history. */
+/* ---------------------------------------------------------------- splits */
+
+/**
+ * A split isn't real until the entertainer has agreed to it. These states are
+ * the backend's Prisma enum; none may be collapsed into another in the UI.
+ */
+export const SPLIT_RULE_STATUSES = [
+  "PENDING_ENTERTAINER_APPROVAL",
+  "ACTIVE",
+  "REJECTED",
+  "SUPERSEDED",
+] as const;
+export type SplitRuleStatus = (typeof SPLIT_RULE_STATUSES)[number];
+
+/** VENUE_PROPOSAL = the entertainer accepted. ADMIN_OVERRIDE = nobody did. */
+export const SPLIT_RULE_ORIGINS = ["VENUE_PROPOSAL", "ADMIN_OVERRIDE"] as const;
+export type SplitRuleOrigin = (typeof SPLIT_RULE_ORIGINS)[number];
+
+/** Shares are basis points: 10000 = 100%. History is append-only. */
 export interface SplitRule {
   id: string;
   venueId: string;
   entertainerBps: number;
   venueBps: number;
+  /** Always computed server-side on the governance API; never client input. */
   platformBps: number;
-  effectiveFrom: string;
+  /** Null while a proposal is unanswered — an unenforced rule has no start date. */
+  effectiveFrom: string | null;
   effectiveTo: string | null;
   createdAt: string;
   updatedAt: string;
+
+  /* Present only on the governance API. A legacy backend omits them entirely,
+     which is what `isGovernanceRule` below detects. */
+  status?: SplitRuleStatus;
+  origin?: SplitRuleOrigin;
+  entertainerId?: string | null;
+  proposedByUserId?: string | null;
+  proposedAt?: string;
+  respondedAt?: string | null;
+}
+
+/**
+ * The legacy API returns rules with no `status`. Treat those as active when
+ * they have no `effectiveTo`, which is exactly what "active" meant before.
+ */
+export function effectiveStatus(rule: SplitRule): SplitRuleStatus {
+  if (rule.status) return rule.status;
+  return rule.effectiveTo ? "SUPERSEDED" : "ACTIVE";
+}
+
+/** POST /split-rules on the governance API — carries the one-time consent link. */
+export interface SplitRuleProposal extends SplitRule {
+  consentUrl: string;
+  consentToken: string;
+}
+
+/** GET /platform/settings — absent on a legacy backend. */
+export interface PlatformSettings {
+  platformFeeBps: number;
+  /** What venue and entertainer divide between them. A proposal must sum to this. */
+  splittableBps: number;
+  updatedAt: string;
+}
+
+/** GET /split-rules/{id}/respond/{token} — public, no login. */
+export interface SplitRuleTerms {
+  venueName: string;
+  entertainerName: string;
+  entertainerPercentage: number;
+  venuePercentage: number;
+  platformPercentage: number;
+  entertainerBps: number;
+  venueBps: number;
+  platformBps: number;
+  proposedAt: string;
+  /** A worked example in plain words, written by the backend. */
+  example: string;
+}
+
+export interface SplitRuleAuditEvent {
+  id?: string;
+  splitRuleId?: string;
+  event?: string;
+  actorUserId?: string | null;
+  createdAt?: string;
+  [key: string]: unknown;
 }
 
 /** Backend Prisma `Role` enum. Confirmed values, not a guess. */

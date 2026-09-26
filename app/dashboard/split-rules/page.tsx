@@ -2,30 +2,35 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import {
-  Badge,
   Card,
   CardHeader,
   EmptyState,
   ErrorNotice,
   PageHeader,
+  SplitStatusBadge,
   Table,
   Td,
   Th,
 } from "@/components/admin/ui";
-import { getActiveSplitRule, listSplitRules, listVenues } from "@/lib/api/dashboard";
+import {
+  getActiveSplitRule,
+  getPlatformSettings,
+  listEntertainers,
+  listSplitRules,
+  listVenues,
+} from "@/lib/api/dashboard";
+import { effectiveStatus } from "@/lib/api/types";
 import { formatBps } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 
-import { SplitRuleForm } from "./SplitRuleForm";
+import { OverrideForm, PlatformFeeForm } from "./AdminControls";
+import { LegacySplitForm } from "./LegacySplitForm";
+import { LockedPlatformFee, ProposeSplitForm } from "./ProposeSplitForm";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Split rules" };
 
-/**
- * Only used when a venue has never had a rule, so there is nothing to carry
- * forward. Matches the backend's own documented example (70/25/5) rather than
- * being invented here.
- */
+/** Only used when a venue has no rule at all, so there's nothing to carry forward. */
 const STARTING_SPLIT = { entertainerBps: 7000, venueBps: 2500, platformBps: 500 };
 
 export default async function SplitRulesPage({
@@ -35,6 +40,7 @@ export default async function SplitRulesPage({
 }) {
   const session = await requireSession();
   const { token } = session;
+  const isPlatformAdmin = session.user.role === "PLATFORM_ADMIN";
   const { venue: venueParam } = await searchParams;
 
   const venues = await listVenues(token).catch(() => null);
@@ -64,27 +70,33 @@ export default async function SplitRulesPage({
 
   const selectedVenue = venues.find((v) => v.id === venueParam) ?? venues[0];
 
-  const [active, history] = await Promise.all([
+  // `settings === null` means the deployed backend predates governance. One
+  // probe drives the whole page rather than each surface guessing separately.
+  const [settings, active, history, entertainers] = await Promise.all([
+    getPlatformSettings(token).catch(() => null),
     getActiveSplitRule(token, selectedVenue.id).catch(() => null),
     listSplitRules(token, selectedVenue.id).catch(() => null),
+    listEntertainers(token).catch(() => null),
   ]);
+
+  const governed = settings !== null;
+  const pending = (history ?? []).filter(
+    (rule) => effectiveStatus(rule) === "PENDING_ENTERTAINER_APPROVAL",
+  );
+  const venueEntertainers = (entertainers ?? []).filter(
+    (e) => e.isActive && e.venueIds.includes(selectedVenue.id),
+  );
 
   return (
     <>
       <PageHeader
         title="Split rules"
-        description="How each tip is divided between the entertainer, the venue and Splitcore."
+        description={
+          governed
+            ? "How each tip is divided. A split only counts once the entertainer has agreed to it."
+            : "How each tip is divided between the entertainer, the venue and Splitcore."
+        }
       />
-
-      {/* A venue with no active rule cannot take tips at all — the payments
-          endpoint rejects them outright. Worth saying loudly. */}
-      {active === null ? (
-        <div className="mb-6">
-          <ErrorNotice
-            message={`${selectedVenue.name} has no active split, so it can't accept tips. Payments will be rejected until one is saved below.`}
-          />
-        </div>
-      ) : null}
 
       {venues.length > 1 ? (
         <nav className="mb-6 flex flex-wrap gap-2">
@@ -104,43 +116,144 @@ export default async function SplitRulesPage({
         </nav>
       ) : null}
 
+      {/* A venue with no ACTIVE rule cannot take tips: payment initialization
+          refuses rather than guessing a split. Say it loudly. */}
+      {active === null ? (
+        <div className="mb-6">
+          <ErrorNotice
+            message={`${selectedVenue.name} has no agreed split, so it can't accept tips. Payments will be rejected until one is ${governed ? "proposed and accepted" : "saved"}.`}
+          />
+        </div>
+      ) : null}
+
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <SplitTile label="Entertainer" bps={active?.entertainerBps} />
         <SplitTile label="Venue" bps={active?.venueBps} />
         <SplitTile label="Splitcore" bps={active?.platformBps} />
       </div>
 
+      {governed && pending.length > 0 ? (
+        <div className="mb-6">
+          <Card>
+            <CardHeader
+              title="Awaiting entertainer approval"
+              description="These divide no money. They take effect only if accepted."
+            />
+            <Table
+              head={
+                <tr>
+                  <Th>Entertainer</Th>
+                  <Th>Venue</Th>
+                  <Th>Splitcore</Th>
+                  <Th>Proposed</Th>
+                  <Th>Status</Th>
+                </tr>
+              }
+            >
+              {pending.map((rule) => (
+                <tr key={rule.id}>
+                  <Td className="tabular-nums">{formatBps(rule.entertainerBps)}</Td>
+                  <Td className="tabular-nums">{formatBps(rule.venueBps)}</Td>
+                  <Td className="tabular-nums">{formatBps(rule.platformBps)}</Td>
+                  <Td className="tabular-nums">
+                    {rule.proposedAt ? formatDate(rule.proposedAt) : "—"}
+                  </Td>
+                  <Td>
+                    <SplitStatusBadge status="PENDING_ENTERTAINER_APPROVAL" />
+                  </Td>
+                </tr>
+              ))}
+            </Table>
+            <p className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+              The approval link is shown once when a proposal is created and can&rsquo;t be
+              retrieved afterwards. If it was lost, propose the split again to get a new one.
+            </p>
+          </Card>
+        </div>
+      ) : null}
+
       <div className="mb-6">
         <Card>
           <CardHeader
-            title={`Set the split for ${selectedVenue.name}`}
-            description="Move the slider to divide what's left after the platform fee."
+            title={
+              governed
+                ? `Propose a split for ${selectedVenue.name}`
+                : `Set the split for ${selectedVenue.name}`
+            }
+            description={
+              governed
+                ? "The entertainer has to accept before it divides any money."
+                : "Move the slider to divide what's left after the platform fee."
+            }
           />
-          <SplitRuleForm
-            selectedVenueId={selectedVenue.id}
-            initial={active ?? STARTING_SPLIT}
-            canEditPlatformFee={session.user.role === "PLATFORM_ADMIN"}
-          />
+          {governed && settings ? (
+            <ProposeSplitForm
+              venueId={selectedVenue.id}
+              entertainers={venueEntertainers}
+              settings={settings}
+              initialEntertainerBps={active?.entertainerBps ?? STARTING_SPLIT.entertainerBps}
+            />
+          ) : (
+            <LegacySplitForm
+              selectedVenueId={selectedVenue.id}
+              initial={active ?? STARTING_SPLIT}
+              canEditPlatformFee={isPlatformAdmin}
+            />
+          )}
         </Card>
       </div>
 
-      {/* The governance model (entertainer has to agree before a split counts)
-          is backend work that has not shipped. Saying so beats implying the
-          current behaviour is the final one. */}
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3.5">
-        <p className="text-sm font-medium text-slate-800">
-          Entertainer approval isn&rsquo;t live yet
-        </p>
-        <p className="mt-1 text-sm leading-relaxed text-slate-500">
-          A split you save here takes effect immediately. Once the backend ships its approval
-          flow, a new split will instead wait for the entertainer to accept it, and this page
-          will show that pending state plus a link you can send them. Nothing here pretends
-          that has already happened.
-        </p>
-      </div>
+      {governed && settings ? (
+        <>
+          {isPlatformAdmin ? (
+            <div className="mb-6 grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader title="Platform fee" description="Splitcore's cut. Platform admins only." />
+                <PlatformFeeForm settings={settings} />
+              </Card>
+              <Card>
+                <CardHeader title="Override" description="The exception, not the process." />
+                <OverrideForm
+                  venueId={selectedVenue.id}
+                  venueName={selectedVenue.name}
+                  initial={
+                    active
+                      ? {
+                          entertainerBps: active.entertainerBps,
+                          venueBps: active.venueBps,
+                          platformBps: active.platformBps,
+                        }
+                      : STARTING_SPLIT
+                  }
+                />
+              </Card>
+            </div>
+          ) : (
+            <div className="mb-6">
+              <Card className="px-5 py-5">
+                <LockedPlatformFee bps={settings.platformFeeBps} />
+              </Card>
+            </div>
+          )}
+        </>
+      ) : (
+        /* Legacy backend: say what's missing rather than implying this is final. */
+        <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+          <p className="text-sm font-medium text-slate-800">
+            Entertainer approval isn&rsquo;t live on this backend yet
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+            <code className="font-mono text-xs">GET /platform/settings</code> returns 404, so
+            this deployment predates split-rule governance. A split saved here takes effect
+            immediately with nobody&rsquo;s agreement. The approval flow, the fixed platform
+            fee and the pending state are all built and switch on by themselves the moment
+            that endpoint exists.
+          </p>
+        </div>
+      )}
 
       <Card>
-        <CardHeader title="History" description="Every split this venue has used." />
+        <CardHeader title="History" description="Every split this venue has proposed or used." />
         {history === null ? (
           <div className="p-5">
             <ErrorNotice message="Couldn't load split history." />
@@ -161,20 +274,24 @@ export default async function SplitRulesPage({
             }
           >
             {[...history]
-              .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))
+              .sort((a, b) =>
+                (b.proposedAt ?? b.effectiveFrom ?? b.createdAt).localeCompare(
+                  a.proposedAt ?? a.effectiveFrom ?? a.createdAt,
+                ),
+              )
               .map((rule) => (
                 <tr key={rule.id}>
                   <Td className="tabular-nums">{formatBps(rule.entertainerBps)}</Td>
                   <Td className="tabular-nums">{formatBps(rule.venueBps)}</Td>
                   <Td className="tabular-nums">{formatBps(rule.platformBps)}</Td>
-                  <Td className="tabular-nums">{formatDate(rule.effectiveFrom)}</Td>
+                  <Td className="tabular-nums">
+                    {rule.effectiveFrom ? formatDate(rule.effectiveFrom) : "—"}
+                  </Td>
                   <Td className="tabular-nums">
                     {rule.effectiveTo ? formatDate(rule.effectiveTo) : "—"}
                   </Td>
                   <Td>
-                    <Badge tone={rule.effectiveTo ? "neutral" : "positive"}>
-                      {rule.effectiveTo ? "Closed" : "Active"}
-                    </Badge>
+                    <SplitStatusBadge status={effectiveStatus(rule)} origin={rule.origin} />
                   </Td>
                 </tr>
               ))}

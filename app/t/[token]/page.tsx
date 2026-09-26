@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { PaymentStatusView } from "@/components/PaymentStatus";
 import { resolveToken } from "@/lib/api/guest";
 
-import { GuestShell } from "./GuestShell";
+import { GuestShell } from "@/components/GuestShell";
 import { TipFlow } from "./TipFlow";
 
 /**

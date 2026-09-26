@@ -1,4 +1,4 @@
-import { GuestShell } from "./GuestShell";
+import { GuestShell } from "@/components/GuestShell";
 
 /** Shown while the token resolves. Render cold-starts, so this is a real wait. */
 export default function Loading() {

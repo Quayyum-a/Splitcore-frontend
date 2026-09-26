@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 
 import { PaymentStatusView } from "@/components/PaymentStatus";
 
-import { GuestShell } from "../../t/[token]/GuestShell";
+import { GuestShell } from "@/components/GuestShell";
 
 /**
  * Legacy return route.

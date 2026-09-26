@@ -3,25 +3,25 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { createSplitRuleAction, type SplitRuleFormState } from "./actions";
+import { createSplitRuleLegacyAction, type SplitRuleFormState } from "./actions";
 
 const INITIAL: SplitRuleFormState = { error: null, success: null };
 const TOTAL_BPS = 10_000;
 
 /**
- * Percentages in the UI, basis points on the wire.
+ * LEGACY form, rendered only when GET /platform/settings 404s — i.e. the
+ * deployed backend predates split-rule governance.
  *
- * The platform share is locked for venue admins: it is Splitcore's fee, not a
- * venue's to set. Today the live API still accepts it from the client, so it is
- * submitted as a hidden field carried forward from the venue's active rule —
- * when the backend starts computing it server-side, that hidden input is all
- * that needs removing.
+ * Here all three shares are client input and the rule takes effect immediately
+ * with no entertainer consent. The platform share is still locked for venue
+ * admins and carried forward from the active rule, so the page looks and behaves
+ * as close to the governed version as the old API allows.
  *
  * Venue and entertainer are a linked pair. Moving one moves the other so the
  * three always total 100%: an invalid split is not a state worth letting
  * someone type their way into and then be told off about.
  */
-export function SplitRuleForm({
+export function LegacySplitForm({
   selectedVenueId,
   initial,
   canEditPlatformFee,
@@ -30,7 +30,7 @@ export function SplitRuleForm({
   initial: { entertainerBps: number; venueBps: number; platformBps: number };
   canEditPlatformFee: boolean;
 }) {
-  const [state, formAction] = useActionState(createSplitRuleAction, INITIAL);
+  const [state, formAction] = useActionState(createSplitRuleLegacyAction, INITIAL);
   const [platformBps, setPlatformBps] = useState(initial.platformBps);
   const [entertainerBps, setEntertainerBps] = useState(initial.entertainerBps);
 

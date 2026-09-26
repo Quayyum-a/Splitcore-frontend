@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { KycStatus } from "@/lib/api/types";
+import type { KycStatus, SplitRuleOrigin, SplitRuleStatus } from "@/lib/api/types";
 
 /**
  * Shared admin primitives. The dashboard's visual brief is sober
@@ -203,4 +203,32 @@ export function KycBadge({ status }: { status: KycStatus }) {
           : "neutral";
 
   return <Badge tone={tone}>{status.replace(/_/g, " ").toLowerCase()}</Badge>;
+}
+
+/**
+ * A split's real state. Pending is deliberately the loudest thing on the row:
+ * the entire point of the governance model is that a proposal is not an
+ * agreement, and the UI must never let those two read the same.
+ */
+export function SplitStatusBadge({
+  status,
+  origin,
+}: {
+  status: SplitRuleStatus;
+  origin?: SplitRuleOrigin;
+}) {
+  if (status === "ACTIVE" && origin === "ADMIN_OVERRIDE") {
+    return <Badge tone="warning">Active · forced</Badge>;
+  }
+
+  switch (status) {
+    case "PENDING_ENTERTAINER_APPROVAL":
+      return <Badge tone="warning">Awaiting approval</Badge>;
+    case "ACTIVE":
+      return <Badge tone="positive">Active</Badge>;
+    case "REJECTED":
+      return <Badge tone="danger">Rejected</Badge>;
+    case "SUPERSEDED":
+      return <Badge tone="neutral">Superseded</Badge>;
+  }
 }

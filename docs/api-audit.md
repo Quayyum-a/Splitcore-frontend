@@ -473,3 +473,106 @@ Docs</title>`). Linked from the README.
 4. The **guest tipping screen has not been visually verified** — rendering `TipFlow` needs a valid
    token, and this session has no browser automation. Structure, copy, tokens and the absence of any
    gradient are verified from the rendered HTML.
+
+---
+---
+
+# Re-audit — 2026-09-26 (second pass, with credentials)
+
+## A. Roles verified with real logins ✅
+
+`POST /auth/login` returns exactly `{ accessToken }`. Role comes from the JWT claims.
+
+| Account | `role` claim | `GET /venues` returns |
+|---|---|---|
+| `admin@splitcore.dev` | `PLATFORM_ADMIN` | **3 venues** — Eko Hotel & Suites, Cubana Chief Priest Club, Quilox Nightclub |
+| `admin@quilox.com` | `VENUE_ADMIN` | **1 venue** — Quilox Nightclub |
+| `admin@cubana.com` | `VENUE_ADMIN` | **1 venue** — Cubana Chief Priest Club |
+
+Venue scoping is enforced server-side, so `GET /venues` is already the right data for each
+caller. Confirmed end-to-end through the dashboard: the platform admin sees the "All venues"
+nav item and the cross-venue page; a venue admin gets a 307 away from it.
+
+> Repeated logins hit `@AuthRateLimit()`. If a login returns an empty body, wait rather than retry.
+
+## B. ⚠️ Split-rule governance is NOT deployed
+
+The deployed OpenAPI document is **byte-identical** to the round-1 snapshot, and:
+
+```bash
+curl -s .../platform/settings -H "Authorization: Bearer $PLATFORM_ADMIN_JWT"
+# 404 {"statusCode":404,"message":"Cannot GET /platform/settings"}
+```
+
+The governance work exists as commit `3b28fad feat(split-rules): fix the platform fee and
+require entertainer consent`, but the backend repo is **4 commits ahead of `origin/main` and
+has never been pushed**. `origin/main` is `a8162b5` (the CORS fix), which is what Render is
+serving. The same is true of `b62d2c7` (the Paystack callback change) — which is why
+`/pay/confirming` is still doing real work.
+
+> **To make governance live:** push the backend (`git push origin main`) and let Render redeploy.
+> The frontend needs no change — it detects the new API at runtime (§C).
+
+## C. The governance contract, and how the frontend handles both versions
+
+`GET /platform/settings` is the **capability probe**. One call decides the whole page, rather
+than six surfaces each guessing:
+
+- **200** → governance API. Propose/approve flow, server-set platform fee, real status badges.
+- **404** → legacy API. All three shares are client input, rules take effect immediately, and
+  the page says so plainly instead of implying otherwise.
+
+### Endpoints (read from the backend's committed DTOs)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/platform/settings` | any role | `{ platformFeeBps, splittableBps, updatedAt }` |
+| PATCH | `/platform/settings` | `PLATFORM_ADMIN` | `{ platformFeeBps }` (0–9000). Rules in force keep their agreed fee |
+| POST | `/split-rules` | venue/platform | **Proposes.** `{ venueId, entertainerId, entertainerBps, venueBps }` — **sending `platformBps` is a 400** |
+| POST | `/split-rules/override` | `PLATFORM_ADMIN` | All three shares + `reason` (≥10 chars). Immediate, stamped `ADMIN_OVERRIDE` |
+| GET | `/split-rules/{id}/respond/{token}` | **public** | Proposed terms + a worked example |
+| POST | `/split-rules/{id}/respond/{token}` | **public** | `{ decision: "ACCEPT" \| "REJECT" }`. 404 invalid, 409 already answered |
+| GET | `/split-rules/venue/{venueId}` | venue/platform | Full history, newest first |
+| GET | `/split-rules/venue/{venueId}/active` | venue/platform | **Only ever ACTIVE.** 404 = no agreed rule = tips refused |
+| GET | `/split-rules/{id}/audit` | venue/platform | Append-only trail |
+
+`SplitRuleStatus` = `PENDING_ENTERTAINER_APPROVAL | ACTIVE | REJECTED | SUPERSEDED`.
+`SplitRuleOrigin` = `VENUE_PROPOSAL | ADMIN_OVERRIDE`.
+`effectiveFrom` is **null** while a proposal is unanswered.
+
+### The consent URL
+
+The backend builds it as `{FRONTEND_URL}/split-rules/{id}/respond/{token}` — note the rule id
+is **in the path**, so the frontend route is `/split-rules/[id]/respond/[token]`, not
+`/split-rules/respond/[token]`. It is returned **once** on the proposal response and is never
+retrievable again; there is no notification channel, so the dashboard is the delivery
+mechanism. The UI treats losing that panel as a real failure and offers a copy button.
+
+## D. What was verified, and how
+
+Governance can't run against the deployed backend, so the frontend's governance paths were
+exercised against a **contract mock** built from the backend's own committed DTOs (test
+harness, in scratch, not in this repo):
+
+- ✅ Propose form: entertainer picker, locked platform fee, linked venue/entertainer pair
+- ✅ "Awaiting entertainer approval" table renders separately from history
+- ✅ All four status badges, including **`Active · forced`** for `ACTIVE + ADMIN_OVERRIDE` —
+  the one badge that distinguishes "an entertainer agreed" from "nobody did"
+- ✅ Platform-fee editor and override form appear for `PLATFORM_ADMIN` and are **absent** for
+  `VENUE_ADMIN`
+- ✅ Consent page renders terms, percentages and the backend's worked example; **200 with no
+  cookie** (genuinely public); a wrong token shows "This approval link isn't valid."
+- ✅ `proposeSplitRule` never sends `platformBps`
+
+Against the **real deployed API**, with real credentials: both roles, venue scoping, the
+cross-venue page, real entertainer counts, and the legacy split-rule path.
+
+## E. Still open
+
+1. **No end-to-end payment** through live Paystack — needs a real QR token for a venue with an
+   active split rule.
+2. **410 Gone** on `/t/{token}` still untriggered live.
+3. **The guest tipping screen has not been visually reviewed** — this session has no browser
+   automation. Structure, copy, tokens and zero gradients are verified from rendered HTML.
+4. **Governance is unverified against the real backend** because it isn't deployed. It is
+   verified against the contract; those are different things.
