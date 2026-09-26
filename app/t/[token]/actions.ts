@@ -111,6 +111,17 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
           retryable: true,
         };
       }
+      // A server fault is not the guest's problem to interpret. Passing the
+      // backend's own words through put "An unexpected error occurred" in front
+      // of someone standing in a club holding their phone — true, and useless.
+      // Tell them what to do instead, and don't imply retrying will help.
+      if (error.status >= 500) {
+        return {
+          ok: false,
+          error: "Tips aren't going through right now. Please let the venue know — this is on us, not you.",
+          retryable: false,
+        };
+      }
       return { ok: false, error: error.message, retryable: true };
     }
     return { ok: false, error: "Something went wrong. Please try again.", retryable: true };

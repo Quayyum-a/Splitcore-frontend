@@ -70,16 +70,18 @@ export default async function SplitRulesPage({
 
   const selectedVenue = venues.find((v) => v.id === venueParam) ?? venues[0];
 
-  // `settings === null` means the deployed backend predates governance. One
-  // probe drives the whole page rather than each surface guessing separately.
-  const [settings, active, history, entertainers] = await Promise.all([
-    getPlatformSettings(token).catch(() => null),
+  // One probe drives the whole page rather than each surface guessing. Note it
+  // is NOT wrapped in `.catch(() => …)`: swallowing a failure here is exactly
+  // how a broken backend came to look like an old one.
+  const [probe, active, history, entertainers] = await Promise.all([
+    getPlatformSettings(token),
     getActiveSplitRule(token, selectedVenue.id).catch(() => null),
     listSplitRules(token, selectedVenue.id).catch(() => null),
     listEntertainers(token).catch(() => null),
   ]);
 
-  const governed = settings !== null;
+  const governed = probe.kind === "available";
+  const settings = probe.kind === "available" ? probe.settings : null;
   const pending = (history ?? []).filter(
     (rule) => effectiveStatus(rule) === "PENDING_ENTERTAINER_APPROVAL",
   );
@@ -97,6 +99,14 @@ export default async function SplitRulesPage({
             : "How each tip is divided between the entertainer, the venue and Splitcore."
         }
       />
+
+      {probe.kind === "broken" ? (
+        <div className="mb-6">
+          <ErrorNotice
+            message={`Splits are unavailable: the API returned ${probe.status || "no response"} for the platform fee (${probe.message}). Neither proposing nor editing a split will work until that's fixed, so no form is shown. If split-rule endpoints were just deployed, the database migration may not have been applied.`}
+          />
+        </div>
+      ) : null}
 
       {venues.length > 1 ? (
         <nav className="mb-6 flex flex-wrap gap-2">
@@ -118,7 +128,7 @@ export default async function SplitRulesPage({
 
       {/* A venue with no ACTIVE rule cannot take tips: payment initialization
           refuses rather than guessing a split. Say it loudly. */}
-      {active === null ? (
+      {active === null && probe.kind !== "broken" ? (
         <div className="mb-6">
           <ErrorNotice
             message={`${selectedVenue.name} has no agreed split, so it can't accept tips. Payments will be rejected until one is ${governed ? "proposed and accepted" : "saved"}.`}
@@ -172,6 +182,7 @@ export default async function SplitRulesPage({
         </div>
       ) : null}
 
+      {probe.kind === "broken" ? null : (
       <div className="mb-6">
         <Card>
           <CardHeader
@@ -202,6 +213,7 @@ export default async function SplitRulesPage({
           )}
         </Card>
       </div>
+      )}
 
       {governed && settings ? (
         <>
@@ -236,7 +248,7 @@ export default async function SplitRulesPage({
             </div>
           )}
         </>
-      ) : (
+      ) : probe.kind === "absent" ? (
         /* Legacy backend: say what's missing rather than implying this is final. */
         <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3.5">
           <p className="text-sm font-medium text-slate-800">
@@ -250,7 +262,7 @@ export default async function SplitRulesPage({
             that endpoint exists.
           </p>
         </div>
-      )}
+      ) : null}
 
       <Card>
         <CardHeader title="History" description="Every split this venue has proposed or used." />
