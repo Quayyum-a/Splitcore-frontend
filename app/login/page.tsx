@@ -18,8 +18,8 @@ export default async function LoginPage() {
       className="flex min-h-dvh items-center justify-center bg-slate-100 px-5 py-12"
     >
       <div className="w-full max-w-sm">
-        <div className="mb-8 flex justify-center text-slate-900">
-          <Logo />
+        <div className="mb-8 flex justify-center">
+          <Logo size={34} tone="onLight" />
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

@@ -6,17 +6,19 @@ import { formatNaira } from "@/lib/money";
 import type { PaymentStatus, PaymentStatusResponse } from "@/lib/api/types";
 
 /**
- * POLLING DECISION (docs/api-audit.md §9): there is no webhook-to-frontend push,
- * so the confirmation screen polls GET /payments/{reference}/status. Paystack's
- * webhook to the backend usually lands within a couple of seconds, so:
+ * What the guest sees after Paystack sends them back.
  *
- *   - poll every 2s for the first 20s (covers the overwhelming majority),
- *   - then every 4s to keep load light while a slow webhook settles,
- *   - give up polling at 150s and offer a manual re-check, rather than
- *     spinning forever or — worse — quietly deciding it failed.
+ * POLLING: there is no push channel to the browser, so this polls
+ * GET /payments/{reference}/status — which re-verifies CREATED/PENDING against
+ * Paystack server-side, so it is a real answer rather than a guess made from
+ * the redirect's query string.
  *
- * A timeout is explicitly NOT a failure: the money may well have moved. The
- * screen says so plainly instead of guessing.
+ *   every 2s for the first 20s   — covers the overwhelming majority
+ *   every 4s after that          — keeps load light while a slow webhook lands
+ *   stop polling at 150s         — offer a manual re-check instead
+ *
+ * A timeout is deliberately NOT rendered as failure. The money may well have
+ * moved; telling a guest it failed when it didn't is the worst outcome here.
  */
 const FAST_INTERVAL_MS = 2_000;
 const SLOW_INTERVAL_MS = 4_000;
@@ -78,17 +80,16 @@ export function PaymentStatusView({
         setState({ phase: "polling", payment, timedOut });
 
         if (!timedOut) {
-          const delay = elapsed < FAST_PHASE_MS ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS;
-          timer.current = setTimeout(() => void poll(), delay);
+          timer.current = setTimeout(
+            () => void poll(),
+            elapsed < FAST_PHASE_MS ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS,
+          );
         }
       } catch {
-        // A blip on club wifi shouldn't wipe out a result we already have.
+        // A blip on club wifi must not wipe out a result already on screen.
         setState((current) =>
           current.phase === "loading"
-            ? {
-                phase: "error",
-                message: "We couldn't check your payment. Check your connection.",
-              }
+            ? { phase: "error", message: "We couldn't check your payment. Check your connection." }
             : current,
         );
         if (Date.now() - startedAt.current < GIVE_UP_MS) {
@@ -113,12 +114,10 @@ export function PaymentStatusView({
     return (
       <Centered>
         <StatusIcon tone="neutral" glyph="question" />
-        <h1 className="text-xl font-semibold text-ink-100">
-          We couldn&rsquo;t find this payment
-        </h1>
+        <h1 className="text-xl font-semibold text-cream">We couldn&rsquo;t find this payment</h1>
         <p className="mt-3 max-w-[19rem] text-sm leading-relaxed text-ink-400">
-          If money left your account, it will still reach the entertainer. Show this
-          screen to a member of staff if you need help.
+          If money left your account it will still reach the entertainer. Show this screen to
+          a member of staff if you need help.
         </p>
         {retryHref ? <SecondaryLink href={retryHref}>Back to tipping</SecondaryLink> : null}
       </Centered>
@@ -129,11 +128,11 @@ export function PaymentStatusView({
     return (
       <Centered>
         <StatusIcon tone="warning" glyph="alert" />
-        <h1 className="text-xl font-semibold text-ink-100">{state.message}</h1>
+        <h1 className="text-xl font-semibold text-cream">{state.message}</h1>
         <button
           type="button"
           onClick={() => void poll(true)}
-          className="mt-8 h-[3.5rem] w-full rounded-2xl bg-gold-500 text-base font-semibold text-ink-950"
+          className="mt-8 h-[3.5rem] w-full rounded-2xl bg-gold text-base font-semibold text-ink-950"
         >
           Try again
         </button>
@@ -141,38 +140,29 @@ export function PaymentStatusView({
     );
   }
 
-  if (state.phase === "loading") {
+  if (state.phase === "loading" || state.phase === "polling") {
+    const timedOut = state.phase === "polling" && state.timedOut;
     return (
       <Centered>
         <PulseDot />
-        <h1 className="mt-6 text-xl font-semibold text-ink-100">
-          Confirming your payment…
-        </h1>
-        <p className="mt-3 text-sm text-ink-400">This usually takes a few seconds.</p>
-      </Centered>
-    );
-  }
-
-  if (state.phase === "polling") {
-    return (
-      <Centered>
-        <PulseDot />
-        <h1 className="mt-6 text-xl font-semibold text-ink-100">
-          Confirming your payment…
-        </h1>
+        <h1 className="mt-6 text-xl font-semibold text-cream">Confirming your payment…</h1>
         <p className="mt-3 max-w-[19rem] text-sm leading-relaxed text-ink-400">
-          {state.timedOut
-            ? "This is taking longer than usual. Your payment may still go through — don't pay again."
+          {timedOut
+            ? "This is taking longer than usual. Your payment may still go through, so don't pay again."
             : "Hold on while we check with your bank. Don't close this screen."}
         </p>
-        <Amount kobo={state.payment.amountKobo} muted />
-        <Reference value={state.payment.reference} />
-        {state.timedOut ? (
+        {state.phase === "polling" ? (
+          <>
+            <Amount kobo={state.payment.amountKobo} muted />
+            <Reference value={state.payment.reference} />
+          </>
+        ) : null}
+        {timedOut ? (
           <button
             type="button"
             onClick={() => void poll(true)}
             disabled={rechecking}
-            className="mt-8 h-[3.5rem] w-full rounded-2xl border border-ink-700 text-base font-medium text-ink-100 disabled:opacity-60"
+            className="mt-8 h-[3.5rem] w-full rounded-2xl border border-ink-700 text-base font-medium text-cream disabled:opacity-60"
           >
             {rechecking ? "Checking…" : "Check again"}
           </button>
@@ -181,16 +171,15 @@ export function PaymentStatusView({
     );
   }
 
-  return <SettledPayment payment={state.payment} retryHref={retryHref} />;
+  return <Settled payment={state.payment} retryHref={retryHref} />;
 }
 
 /**
- * Every terminal status gets its own screen. SUCCESS and FAILED use the copy
- * fixed by the product spec verbatim; REVERSED and REFUNDED are real states the
- * backend can return and are never collapsed into "failed", because to a guest
- * "your payment failed" and "your payment was refunded" mean different things.
+ * Each terminal status gets its own screen. SUCCESS and FAILED use the copy
+ * fixed by the spec verbatim. REVERSED and REFUNDED are never folded into
+ * "unsuccessful" — to a guest those mean different things.
  */
-function SettledPayment({
+function Settled({
   payment,
   retryHref,
 }: {
@@ -203,11 +192,11 @@ function SettledPayment({
     return (
       <Centered>
         <StatusIcon tone="success" glyph="check" />
-        <h1 className="text-2xl font-semibold text-ink-100">Payment successful</h1>
+        <h1 className="text-2xl font-semibold text-cream">Payment successful</h1>
         <Amount kobo={payment.amountKobo} />
-        <p className="mt-1 text-base text-ink-300">You tipped {recipient}.</p>
+        <p className="mt-1.5 text-base text-ink-300">You tipped {recipient}.</p>
         <Reference value={payment.reference} />
-        <p className="mt-8 inline-flex items-center gap-2 rounded-full border border-success-600/40 bg-success-600/10 px-4 py-2 text-sm font-medium text-success-400">
+        <p className="mt-8 inline-flex items-center gap-2 rounded-full border border-success/30 bg-success/10 px-4 py-2 text-sm font-medium text-success">
           <span aria-hidden="true">✓</span> Payment confirmed
         </p>
       </Centered>
@@ -219,11 +208,11 @@ function SettledPayment({
     return (
       <Centered>
         <StatusIcon tone="neutral" glyph="undo" />
-        <h1 className="text-2xl font-semibold text-ink-100">
+        <h1 className="text-2xl font-semibold text-cream">
           {refunded ? "Payment refunded" : "Payment reversed"}
         </h1>
         <Amount kobo={payment.amountKobo} muted />
-        <p className="mt-1 max-w-[19rem] text-sm leading-relaxed text-ink-400">
+        <p className="mt-1.5 max-w-[19rem] text-sm leading-relaxed text-ink-400">
           {refunded
             ? `This tip to ${recipient} was refunded. The money is on its way back to you.`
             : `This tip to ${recipient} was reversed and will be returned to you.`}
@@ -234,17 +223,17 @@ function SettledPayment({
     );
   }
 
-  // FAILED and ABANDONED. Copy is fixed by the spec.
+  // FAILED and ABANDONED. Copy fixed by the spec.
   return (
     <Centered>
       <StatusIcon tone="danger" glyph="cross" />
-      <h1 className="text-2xl font-semibold text-ink-100">Payment unsuccessful</h1>
+      <h1 className="text-2xl font-semibold text-cream">Payment unsuccessful</h1>
       <p className="mt-4 text-base text-ink-300">Your payment wasn&rsquo;t completed.</p>
       <Reference value={payment.reference} />
       {retryHref ? (
         <a
           href={retryHref}
-          className="mt-8 flex h-[3.75rem] w-full items-center justify-center rounded-2xl bg-gold-500 text-lg font-semibold text-ink-950"
+          className="mt-8 flex h-[3.75rem] w-full items-center justify-center rounded-2xl bg-gold text-lg font-semibold text-ink-950"
         >
           Try Again
         </a>
@@ -255,7 +244,7 @@ function SettledPayment({
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <section className="sc-rise flex flex-1 flex-col items-center justify-center pb-6 text-center">
+    <section className="flex h-full flex-col items-center justify-center pb-6 text-center">
       {children}
     </section>
   );
@@ -264,8 +253,8 @@ function Centered({ children }: { children: React.ReactNode }) {
 function Amount({ kobo, muted = false }: { kobo: number; muted?: boolean }) {
   return (
     <p
-      className={`mt-6 text-[2.5rem] leading-none font-bold tabular-nums ${
-        muted ? "text-ink-300" : "text-gold-400"
+      className={`tabular mt-6 text-[2.6rem] leading-none font-bold ${
+        muted ? "text-ink-300" : "text-gold-bright"
       }`}
     >
       {formatNaira(kobo)}
@@ -276,8 +265,8 @@ function Amount({ kobo, muted = false }: { kobo: number; muted?: boolean }) {
 function Reference({ value }: { value: string }) {
   return (
     <div className="mt-7">
-      <p className="text-xs uppercase tracking-[0.16em] text-ink-600">Reference</p>
-      <p className="mt-1.5 font-mono text-sm break-all text-ink-300">{value}</p>
+      <p className="text-xs text-ink-600">Reference</p>
+      <p className="tabular mt-1.5 text-sm break-all text-ink-300">{value}</p>
     </div>
   );
 }
@@ -286,7 +275,7 @@ function SecondaryLink({ href, children }: { href: string; children: React.React
   return (
     <a
       href={href}
-      className="mt-8 flex h-[3.5rem] w-full items-center justify-center rounded-2xl border border-ink-700 text-base font-medium text-ink-100"
+      className="mt-8 flex h-[3.5rem] w-full items-center justify-center rounded-2xl border border-ink-700 text-base font-medium text-cream"
     >
       {children}
     </a>
@@ -298,10 +287,10 @@ function PulseDot() {
     <span className="relative flex h-12 w-12 items-center justify-center">
       <span
         aria-hidden="true"
-        className="absolute inset-0 rounded-full border border-gold-500/50"
+        className="absolute inset-0 rounded-full border border-gold/50"
         style={{ animation: "sc-pulse-ring 1.6s ease-out infinite" }}
       />
-      <span className="h-3 w-3 rounded-full bg-gold-500" />
+      <span className="h-2.5 w-2.5 rounded-full bg-gold" />
     </span>
   );
 }
@@ -314,10 +303,10 @@ function StatusIcon({
   glyph: "check" | "cross" | "undo" | "question" | "alert";
 }) {
   const tones = {
-    success: "border-success-600/40 bg-success-600/10 text-success-400",
-    danger: "border-danger-600/40 bg-danger-600/10 text-danger-400",
+    success: "border-success/30 bg-success/10 text-success",
+    danger: "border-danger/30 bg-danger/10 text-danger",
     neutral: "border-ink-700 bg-ink-850 text-ink-300",
-    warning: "border-gold-600/40 bg-gold-600/10 text-gold-400",
+    warning: "border-gold/30 bg-gold/10 text-gold",
   } as const;
 
   const paths = {

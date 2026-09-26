@@ -227,7 +227,7 @@ Every origin tested returned **500**, not a clean CORS rejection:
 
 | Origin | Result |
 |---|---|
-| `https://splitcore-frontend.netlify.app` | **500** |
+| `https://splitcore-app.netlify.app` | **500** |
 | `http://localhost:3000` | **500** |
 | `https://example.com` | **500** |
 | *(no Origin header)* | **200** ✅ |
@@ -259,7 +259,7 @@ change, *not* a source edit. **No backend file was modified by this work.**
 >
 > | Key | Value |
 > |---|---|
-> | `ALLOWED_ORIGINS` | `https://splitcore-frontend.netlify.app,https://<custom-domain-when-added>` |
+> | `ALLOWED_ORIGINS` | `https://splitcore-app.netlify.app,https://<custom-domain-when-added>` |
 >
 > Comma-separated, no spaces, no trailing slashes. Include every Netlify domain that must reach the
 > API from a browser. Redeploy/restart for it to take effect.
@@ -295,7 +295,7 @@ BASE=https://splitcore-api.onrender.com
 curl -s $BASE/health | jq .
 curl -s $BASE/api/docs-json -o /tmp/splitcore-openapi.json
 jq -r '.paths | to_entries[] | .key as $p | .value | to_entries[] | "\(.key|ascii_upcase) \($p)"' /tmp/splitcore-openapi.json
-curl -s $BASE/health -H "Origin: https://splitcore-frontend.netlify.app" -i | head -1
+curl -s $BASE/health -H "Origin: https://splitcore-app.netlify.app" -i | head -1
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/t/bogustoken123     # expect 404
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/venues              # expect 401
 ```
@@ -366,3 +366,110 @@ No backend source file was modified.
    If venues should be able to set their own, that is new backend work.
 5. **Spectacle mode** has no supporting flag or endpoint, so the "Your tip is now showing on the
    venue screen" line is not rendered. Building it would mean faking it.
+
+---
+---
+
+# Re-audit — 2026-09-26
+
+Run before starting the v2 design work. **The deployed OpenAPI document is byte-identical to the
+round-1 snapshot**, so the endpoint surface has not changed. Three things around it have.
+
+```bash
+diff <(jq -S . docs/splitcore-openapi.snapshot.json) <(curl -s .../api/docs-json | jq -S .)
+# (no output — identical)
+```
+
+## A. CORS is fixed ✅
+
+The round-1 blocker (§4) is gone. Verified live:
+
+| Origin | Status | `Access-Control-Allow-Origin` |
+|---|---|---|
+| `https://splitcore-app.netlify.app` | 200 | `https://splitcore-app.netlify.app` ✅ |
+| `http://localhost:3000` | 200 | *(none — correctly not allowed in production)* |
+| `https://evil.example.com` | 200 | *(none — cleanly denied)* |
+
+A disallowed origin now gets a clean denial instead of the previous **500**. The frontend still
+proxies every call server-side — that remains the right design for keeping the JWT httpOnly and the
+API URL out of the bundle — but browser calls are no longer categorically impossible.
+
+## B. `POST /auth/login`'s response shape — CONFIRMED, was the last guess in the codebase
+
+```jsonc
+{ "accessToken": "<jwt>" }
+```
+
+**That is the whole body.** There is no `user` object, despite the OpenAPI description saying
+"Returns JWT access token and user details". Everything about the caller lives in the JWT's claims:
+
+```jsonc
+{ "sub": "<user id>", "email": "...", "role": "PLATFORM_ADMIN" | "VENUE_ADMIN" }
+```
+
+`role` is the backend's Prisma `Role` enum, and those two values are the complete set. There is no
+`venueId` claim — venue scoping is applied server-side, so `GET /venues` already returns only what
+the caller may see.
+
+`lib/api/auth.ts` is tightened to this and now types `role` as a closed union. The claims are read
+for display and navigation only; the backend re-authorises every call, so a forged claim yields a
+403, not access.
+
+## C. Paystack now returns the guest to the tipping page
+
+The payments service builds its callback as:
+
+```
+{FRONTEND_URL}/t/{publicToken}?reference={ourReference}
+```
+
+`FRONTEND_URL` takes precedence over the older `PAYMENT_CALLBACK_URL` (which, per the backend's own
+comment, has pointed at the API's own host before). Paystack then appends its own `reference` and
+`trxref`, so a **repeated query parameter is expected** — ours is appended first, so the first value
+is the one the status endpoint knows.
+
+`/t/[token]` now handles `?reference=`. `/pay/confirming` is kept working for a deployment still on
+the old setting: a guest who has already paid must never land on a 404.
+
+> **Render env var required:** `FRONTEND_URL` = `https://splitcore-app.netlify.app`
+
+## D. Split-rule governance has NOT shipped
+
+`CreateSplitRuleDto` still requires **all three** shares from the client:
+
+```jsonc
+{ "venueId": string, "entertainerBps": number, "venueBps": number, "platformBps": number }
+```
+
+`SplitRuleResponseDto` has **no status field** — a rule is active when `effectiveTo` is null, and
+creating one takes effect immediately. There is no approval state, no approval token, and no
+`/split-rules/respond` endpoint.
+
+What was built against this reality:
+
+- Platform fee is **locked in the UI** for venue admins and submitted as a hidden field carried
+  forward from the venue's active rule. When the backend computes it server-side, deleting that
+  hidden input is the entire change.
+- Venue and entertainer shares are a **linked pair** that always total the remainder, so an invalid
+  split can't be typed.
+- Status badges show the **real** states (Active / Closed). **No "Pending entertainer approval"
+  badge was built**, because nothing produces that state — a badge that never appears is worse than
+  none.
+- `/split-rules/respond/[token]` was **not built**. No endpoint backs it.
+- The page states plainly that approval isn't live and that a saved split takes effect immediately.
+
+## E. Swagger UI is live ✅
+
+`https://splitcore-api.onrender.com/api/docs` renders a real Swagger UI (`<title>Splitcore API
+Docs</title>`). Linked from the README.
+
+## F. Still open
+
+1. **No credentials have been supplied yet.** The `PLATFORM_ADMIN` vs `VENUE_ADMIN` split is
+   implemented against the confirmed claim, but **has not been exercised with two real logins**.
+2. **No end-to-end payment** has been run through live Paystack — still needs a real QR token from a
+   venue with an active split rule.
+3. **410 Gone** remains untriggered live; handled distinctly but unconfirmed.
+4. The **guest tipping screen has not been visually verified** — rendering `TipFlow` needs a valid
+   token, and this session has no browser automation. Structure, copy, tokens and the absence of any
+   gradient are verified from the rendered HTML.

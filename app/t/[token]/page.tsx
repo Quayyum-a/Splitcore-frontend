@@ -1,20 +1,23 @@
 import type { Metadata } from "next";
 
+import { PaymentStatusView } from "@/components/PaymentStatus";
 import { resolveToken } from "@/lib/api/guest";
 
 import { GuestShell } from "./GuestShell";
-import { TipForm } from "./TipForm";
+import { TipFlow } from "./TipFlow";
 
 /**
- * The page a scanned QR code actually lands on.
+ * The page a scanned QR code lands on — and, now, the page Paystack returns the
+ * guest to.
  *
- * This route is the whole reason this frontend exists. The backend's
- * GET /t/{token} returns JSON (docs/api-audit.md §3.2) — pointing a QR code at
- * it shows a guest raw JSON. QR codes encode THIS url instead, and this page
- * turns the token into a human tipping screen.
+ * The backend builds its callback as `{FRONTEND_URL}/t/{publicToken}?reference=…`
+ * (verified against the deployed payments service), so paying and coming back
+ * are one continuous flow on a single route with no extra page to bounce
+ * through. /pay/confirming is kept working as well, because an older
+ * PAYMENT_CALLBACK_URL deployment points there instead.
  *
- * force-dynamic: a token's validity changes the moment a venue deactivates a
- * QR code. A cached "still valid" render would take tips for a dead code.
+ * force-dynamic: a token's validity changes the moment a venue deactivates its
+ * code. A cached "still valid" render would take tips for a dead code.
  */
 export const dynamic = "force-dynamic";
 
@@ -22,10 +25,31 @@ export const metadata: Metadata = { title: "Send a tip" };
 
 export default async function TipPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { token } = await params;
+  const [{ token }, query] = await Promise.all([params, searchParams]);
+
+  // Paystack appends its own `reference` and `trxref` on top of ours, so a
+  // repeated parameter is expected. Ours is appended first, so the first value
+  // is the one the status endpoint knows.
+  const first = (value: string | string[] | undefined) =>
+    Array.isArray(value) ? value[0] : value;
+  const reference = first(query.reference) ?? first(query.trxref) ?? null;
+
+  if (reference) {
+    return (
+      <GuestShell>
+        <PaymentStatusView
+          reference={reference}
+          retryHref={`/t/${encodeURIComponent(token)}`}
+        />
+      </GuestShell>
+    );
+  }
+
   const resolution = await resolveToken(token);
 
   if (resolution.kind === "not-found") {
@@ -64,7 +88,7 @@ export default async function TipPage({
 
   return (
     <GuestShell>
-      <TipForm token={token} resolution={resolution.data} />
+      <TipFlow token={token} resolution={resolution.data} />
     </GuestShell>
   );
 }
@@ -79,27 +103,20 @@ function GuestMessage({
   tone?: "neutral" | "warning";
 }) {
   return (
-    <section className="sc-rise flex flex-1 flex-col items-center justify-center text-center">
+    <section className="flex h-full flex-col items-center justify-center text-center">
       <span
         aria-hidden="true"
         className={`mb-6 flex h-14 w-14 items-center justify-center rounded-full border ${
-          tone === "warning"
-            ? "border-gold-600/40 text-gold-500"
-            : "border-ink-700 text-ink-400"
+          tone === "warning" ? "border-gold/30 text-gold" : "border-ink-700 text-ink-400"
         }`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
-          <path
-            d="M12 7.5v5.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
+          <path d="M12 7.5v5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           <circle cx="12" cy="16.5" r="1.1" fill="currentColor" />
         </svg>
       </span>
-      <h1 className="text-xl font-semibold text-ink-100">{title}</h1>
+      <h1 className="text-xl font-semibold text-cream">{title}</h1>
       <p className="mt-3 max-w-[18rem] text-sm leading-relaxed text-ink-400">{detail}</p>
     </section>
   );

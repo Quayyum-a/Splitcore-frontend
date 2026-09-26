@@ -21,6 +21,16 @@ export const getVenue = (token: string, venueId: string) =>
 export const updateVenue = (token: string, venueId: string, body: Partial<Venue>) =>
   apiFetch<Venue>(`/venues/${venueId}`, { method: "PATCH", token, body });
 
+/** Platform-admin only; the backend rejects a VENUE_ADMIN with 403. */
+export const createVenue = (
+  token: string,
+  body: { name: string; slug: string; location: string; logoUrl?: string },
+) => apiFetch<Venue>("/venues", { method: "POST", token, body });
+
+/** Soft delete. */
+export const deactivateVenue = (token: string, venueId: string) =>
+  apiFetch<void>(`/venues/${venueId}`, { method: "DELETE", token });
+
 export const listEntertainers = (token: string) =>
   apiFetch<Entertainer[]>("/entertainers", { token });
 

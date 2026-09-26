@@ -20,7 +20,12 @@ export default async function DashboardLayout({
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const NAV = [
+  const isPlatformAdmin = session.user.role === "PLATFORM_ADMIN";
+
+  // "All venues" is cross-venue and platform-admin only; the rest is venue
+  // scoped by the backend, so a venue admin's dashboard is unchanged.
+  const nav = [
+    ...(isPlatformAdmin ? [{ href: "/dashboard/venues", label: "All venues" }] : []),
     { href: "/dashboard", label: "Overview" },
     { href: "/dashboard/qr-codes", label: "QR codes" },
     { href: "/dashboard/entertainers", label: "Entertainers" },
@@ -33,13 +38,18 @@ export default async function DashboardLayout({
     <div data-surface="admin" className="min-h-dvh bg-slate-100">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5">
-          <Link href="/dashboard" className="text-slate-900">
-            <Logo />
+          <Link href="/dashboard">
+            <Logo size={26} tone="onLight" />
           </Link>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {session.user.email ? (
               <span className="hidden text-sm text-slate-500 sm:inline">
                 {session.user.email}
+              </span>
+            ) : null}
+            {isPlatformAdmin ? (
+              <span className="hidden rounded-md bg-slate-900 px-2 py-0.5 text-xs font-medium text-white sm:inline">
+                Platform admin
               </span>
             ) : null}
             <form action={logoutAction}>
@@ -55,7 +65,7 @@ export default async function DashboardLayout({
 
         <nav className="mx-auto max-w-6xl px-5">
           <ul className="-mb-px flex gap-1 overflow-x-auto">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <li key={item.href}>
                 <Link
                   href={item.href}

@@ -21,15 +21,20 @@ import { SplitRuleForm } from "./SplitRuleForm";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Split rules" };
 
-/** Sensible starting point when a venue has no rule yet: 70 / 25 / 5. */
-const DEFAULT_SPLIT = { entertainerBps: 7000, venueBps: 2500, platformBps: 500 };
+/**
+ * Only used when a venue has never had a rule, so there is nothing to carry
+ * forward. Matches the backend's own documented example (70/25/5) rather than
+ * being invented here.
+ */
+const STARTING_SPLIT = { entertainerBps: 7000, venueBps: 2500, platformBps: 500 };
 
 export default async function SplitRulesPage({
   searchParams,
 }: {
   searchParams: Promise<{ venue?: string }>;
 }) {
-  const { token } = await requireSession();
+  const session = await requireSession();
+  const { token } = session;
   const { venue: venueParam } = await searchParams;
 
   const venues = await listVenues(token).catch(() => null);
@@ -50,7 +55,7 @@ export default async function SplitRulesPage({
         <Card>
           <EmptyState
             title="No venues on this account"
-            detail="Split rules are configured per venue, so there's nothing to set up yet."
+            detail="Splits are configured per venue, so there's nothing to set up yet."
           />
         </Card>
       </>
@@ -71,11 +76,13 @@ export default async function SplitRulesPage({
         description="How each tip is divided between the entertainer, the venue and Splitcore."
       />
 
-      {/* A venue with no active rule cannot take tips at all — the payment
-          endpoint rejects it outright. That's worth saying loudly. */}
+      {/* A venue with no active rule cannot take tips at all — the payments
+          endpoint rejects them outright. Worth saying loudly. */}
       {active === null ? (
         <div className="mb-6">
-          <ErrorNotice message={`${selectedVenue.name} has no active split rule, so it cannot accept tips. Payments will be rejected until one is set below.`} />
+          <ErrorNotice
+            message={`${selectedVenue.name} has no active split, so it can't accept tips. Payments will be rejected until one is saved below.`}
+          />
         </div>
       ) : null}
 
@@ -106,28 +113,40 @@ export default async function SplitRulesPage({
       <div className="mb-6">
         <Card>
           <CardHeader
-            title={`Set a new split for ${selectedVenue.name}`}
-            description="Shares are stored as basis points and must total exactly 100%."
+            title={`Set the split for ${selectedVenue.name}`}
+            description="Move the slider to divide what's left after the platform fee."
           />
           <SplitRuleForm
-            venues={venues}
             selectedVenueId={selectedVenue.id}
-            initial={active ?? DEFAULT_SPLIT}
+            initial={active ?? STARTING_SPLIT}
+            canEditPlatformFee={session.user.role === "PLATFORM_ADMIN"}
           />
         </Card>
       </div>
 
+      {/* The governance model (entertainer has to agree before a split counts)
+          is backend work that has not shipped. Saying so beats implying the
+          current behaviour is the final one. */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+        <p className="text-sm font-medium text-slate-800">
+          Entertainer approval isn&rsquo;t live yet
+        </p>
+        <p className="mt-1 text-sm leading-relaxed text-slate-500">
+          A split you save here takes effect immediately. Once the backend ships its approval
+          flow, a new split will instead wait for the entertainer to accept it, and this page
+          will show that pending state plus a link you can send them. Nothing here pretends
+          that has already happened.
+        </p>
+      </div>
+
       <Card>
-        <CardHeader title="History" description="Every rule this venue has ever used." />
+        <CardHeader title="History" description="Every split this venue has used." />
         {history === null ? (
           <div className="p-5">
-            <ErrorNotice message="Couldn't load split-rule history." />
+            <ErrorNotice message="Couldn't load split history." />
           </div>
         ) : history.length === 0 ? (
-          <EmptyState
-            title="No rules yet"
-            detail="The first rule you save will appear here."
-          />
+          <EmptyState title="No splits yet" detail="The first one you save appears here." />
         ) : (
           <Table
             head={
@@ -135,8 +154,8 @@ export default async function SplitRulesPage({
                 <Th>Entertainer</Th>
                 <Th>Venue</Th>
                 <Th>Splitcore</Th>
-                <Th>Effective from</Th>
-                <Th>Effective to</Th>
+                <Th>In effect from</Th>
+                <Th>Until</Th>
                 <Th>Status</Th>
               </tr>
             }

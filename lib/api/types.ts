@@ -131,9 +131,16 @@ export interface SplitRule {
   updatedAt: string;
 }
 
+/** Backend Prisma `Role` enum. Confirmed values, not a guess. */
+export const ROLES = ["PLATFORM_ADMIN", "VENUE_ADMIN"] as const;
+export type Role = (typeof ROLES)[number];
+
+export function isRole(value: unknown): value is Role {
+  return typeof value === "string" && (ROLES as readonly string[]).includes(value);
+}
+
 export interface SessionUser {
   id?: string;
   email?: string;
-  role?: string;
-  venueId?: string | null;
+  role?: Role;
 }

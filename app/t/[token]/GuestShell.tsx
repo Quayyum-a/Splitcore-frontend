@@ -1,23 +1,36 @@
 import { Logo } from "@/components/Logo";
 
 /**
- * The frame every guest screen sits in: dark, centred, phone-first, with a
- * comfortable max width so it doesn't sprawl if someone opens it on a laptop.
+ * The frame every guest screen sits in.
+ *
+ * Solid #08080a throughout — no gradient, no background image, nothing that
+ * costs a paint. A guest opens this one-handed in a dark room on club data;
+ * the fastest possible first screen is a design requirement, not a nicety.
  */
-export function GuestShell({ children }: { children: React.ReactNode }) {
+export function GuestShell({
+  children,
+  footer,
+}: {
+  children: React.ReactNode;
+  /** Pinned to the bottom of the viewport, above the safe area. */
+  footer?: React.ReactNode;
+}) {
   return (
-    <main className="relative flex min-h-dvh flex-col items-center px-5 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.75rem,env(safe-area-inset-top))]">
-      {/* A single soft stage-light wash. Pure CSS — no image to download on
-          club wifi, and it disappears behind content rather than competing. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-[55vh] bg-[radial-gradient(70%_60%_at_50%_0%,rgba(247,181,44,0.16),transparent_70%)]"
-      />
-      <div className="relative flex w-full max-w-[26rem] flex-1 flex-col">
-        <header className="flex justify-center pb-8 text-ink-400">
-          <Logo />
+    <main className="flex min-h-dvh flex-col items-center bg-ink-950 px-5 pt-[max(1.5rem,env(safe-area-inset-top))]">
+      <div className="flex w-full max-w-[26rem] flex-1 flex-col">
+        <header className="flex justify-center pb-7">
+          <Logo size={26} />
         </header>
-        {children}
+
+        <div className={footer ? "flex-1 pb-4" : "flex-1 pb-[max(2rem,env(safe-area-inset-bottom))]"}>
+          {children}
+        </div>
+
+        {footer ? (
+          <div className="sticky bottom-0 -mx-5 bg-ink-950 px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </main>
   );
