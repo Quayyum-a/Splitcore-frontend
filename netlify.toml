@@ -1,0 +1,22 @@
+# Netlify configuration for Splitcore Frontend.
+#
+# This site uses Netlify's official Next.js Runtime (@netlify/plugin-nextjs v5),
+# which supports SSR, ISR and dynamic routes. It is deliberately NOT a static
+# export: /t/[token] resolves a QR token against the live backend per request,
+# and every backend call is proxied server-side (see docs/api-audit.md §4.4).
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
