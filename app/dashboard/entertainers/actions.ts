@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { ApiError } from "@/lib/api/client";
+import { issueLoginLink } from "@/lib/api/kyc";
 import {
   createEntertainer,
   deactivateEntertainer,
@@ -95,4 +96,39 @@ export async function toggleVenueLinkAction(formData: FormData): Promise<void> {
   else await unlinkEntertainerFromVenue(token, entertainerId, venueId);
 
   revalidatePath("/dashboard/entertainers");
+}
+
+/**
+ * Issues a one-time sign-in link for an entertainer.
+ *
+ * There is no notification channel — entertainers have a phone number but no
+ * email, and no notifications module exists — so the venue delivers it by hand.
+ * The link is single use, expires in 30 minutes, and issuing a new one
+ * invalidates any outstanding link, so this is never fire-and-forget: the
+ * dashboard has to show it and the venue has to pass it on.
+ */
+export async function issueLoginLinkAction(
+  _previous: LoginLinkState,
+  formData: FormData,
+): Promise<LoginLinkState> {
+  const entertainerId = String(formData.get("entertainerId") ?? "");
+  const stageName = String(formData.get("stageName") ?? "");
+
+  try {
+    const { token } = await requireSession();
+    const link = await issueLoginLink(token, entertainerId);
+    return { error: null, loginUrl: link.loginUrl, expiresAt: link.expiresAt, stageName };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      return { error: "That entertainer doesn't perform at your venue.", loginUrl: null };
+    }
+    return { error: toMessage(error), loginUrl: null };
+  }
+}
+
+export interface LoginLinkState {
+  error: string | null;
+  loginUrl: string | null;
+  expiresAt?: string;
+  stageName?: string;
 }

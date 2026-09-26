@@ -16,6 +16,7 @@ import { listEntertainers, listVenues } from "@/lib/api/dashboard";
 import { requireSession } from "@/lib/session";
 
 import { EntertainerCreateForm } from "./EntertainerCreateForm";
+import { LoginLinkButton } from "./LoginLinkButton";
 import { setEntertainerActiveAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +56,7 @@ export default async function EntertainersPage() {
       <Card>
         <CardHeader
           title="All entertainers"
-          description="Payout status needs a payouts endpoint the backend doesn't expose yet, so only KYC is shown."
+          description="KYC status is read-only here — only the entertainer moves it. Send a sign-in link so they can complete it themselves."
         />
         {entertainers === null ? (
           <div className="p-5">
@@ -77,6 +78,7 @@ export default async function EntertainersPage() {
                 <Th>KYC</Th>
                 <Th>Venues</Th>
                 <Th>Status</Th>
+                <Th>Access</Th>
                 <Th>{""}</Th>
               </tr>
             }
@@ -114,6 +116,12 @@ export default async function EntertainersPage() {
                   <Badge tone={entertainer.isActive ? "positive" : "neutral"}>
                     {entertainer.isActive ? "Active" : "Inactive"}
                   </Badge>
+                </Td>
+                <Td>
+                  <LoginLinkButton
+                    entertainerId={entertainer.id}
+                    stageName={entertainer.stageName}
+                  />
                 </Td>
                 <Td>
                   <form action={setEntertainerActiveAction}>

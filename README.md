@@ -81,9 +81,10 @@ what was deployed.
 | QR generation, download, deactivate, regenerate | ✅ Real |
 | Entertainers: add, link to venue, activate/deactivate, KYC | ✅ Real |
 | Split rules: active, history, create | ✅ Real |
-| Venue "Total Tips" / "Transactions" / "Pending Payouts" | ⛔ No endpoint exists — shown as *Not yet available* |
-| Transaction history table | ⛔ No endpoint exists — *Coming soon* |
-| Payouts table | ⛔ No endpoint exists — *Coming soon* |
+| Venue "Total Tips" / "Transactions" / "Pending Payouts" | ✅ Real — `GET /venues/{id}/overview` |
+| Transaction history + payouts tables (venue) | ✅ Real, paginated |
+| Entertainer portal: sign-in link, own dashboard, payout onboarding | ✅ Real |
+| Venue-admin view of entertainer KYC status | ✅ Real, read-only |
 | Platform-admin cross-venue management | ✅ Real — gated on the `role` claim, verified with two live accounts |
 | Split rules: platform fee locked, linked venue/entertainer shares | ✅ Real |
 | Entertainer approval: propose → consent link → accept/reject | ✅ Built — **switches on by itself** once the backend ships (see below) |
@@ -93,6 +94,29 @@ what was deployed.
 Nothing in the dashboard computes an aggregate client-side from partial data. A number is either
 fetched from a confirmed endpoint or it is absent, because the product's pitch to venues is
 numbers they can trust.
+
+---
+
+## The entertainer portal
+
+Entertainers have no accounts and no password. A venue admin presses **Sign-in link** on the
+entertainer roster, which calls `POST /entertainer-auth/login-links/{id}`, and hands over
+the resulting URL — there is no notification channel, so the dashboard is the delivery
+mechanism. The link is single use and expires in 30 minutes.
+
+**Landing on that URL redeems nothing.** WhatsApp, iMessage and most SMS clients fetch a URL
+to build a link preview; burning a single-use token on GET would mean a preview bot spends
+the entertainer's only login before they ever tap it. Redemption happens on an explicit tap,
+via a server action.
+
+Onboarding runs one step at a time — bank details → resolve → **confirm the name the bank
+returned** → identity → done. Which step shows is decided entirely by the backend's derived
+`nextStep`; the client never works that out for itself. The confirm step is a real fraud
+checkpoint and is never skipped or auto-accepted.
+
+> **Known gap:** `bankCode` has no source. The API documents it as coming from the provider's
+> bank list, but exposes no `GET /banks`. The portal asks for it as a typed field rather than
+> shipping a hardcoded list — codes change, and a wrong one sends money to the wrong bank.
 
 ---
 
@@ -189,6 +213,9 @@ app/
   pay/confirming/       Legacy return route, kept for older backend settings
   split-rules/[id]/respond/[token]/
                         Entertainer consent — public, no login, dark-themed
+  entertainer/          The entertainer's own portal: earnings + payout onboarding
+  entertainer/login/[token]/
+                        One-time sign-in link landing
   login/                Venue admin sign-in
   dashboard/            Overview, QR codes, entertainers, split rules,
                         venues (platform admin only), (transactions, payouts)
