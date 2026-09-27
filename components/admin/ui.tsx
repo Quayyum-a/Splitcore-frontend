@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { KycStatus, SplitRuleOrigin, SplitRuleStatus } from "@/lib/api/types";
+import { KYC_COPY } from "@/lib/kyc-copy";
 
 /**
  * Shared admin primitives. The dashboard's visual brief is sober
@@ -191,18 +192,21 @@ export function Td({
   return <td className={`px-5 py-3.5 align-middle text-slate-700 ${className}`}>{children}</td>;
 }
 
-/** KYC state, coloured by how much it should worry a venue manager. */
+/**
+ * KYC state, read-only for a venue. The words come from the shared table so a
+ * venue and the entertainer never see the same state described differently —
+ * and so REVIEW is never dressed up as "Verified" to look further along.
+ *
+ * Only the entertainer (and a platform admin, via the review endpoint) moves
+ * this; a venue can look, not change.
+ */
 export function KycBadge({ status }: { status: KycStatus }) {
-  const tone =
-    status === "VERIFIED"
-      ? "positive"
-      : status === "FAILED" || status === "SUSPENDED"
-        ? "danger"
-        : status === "PENDING" || status === "REVIEW"
-          ? "warning"
-          : "neutral";
-
-  return <Badge tone={tone}>{status.replace(/_/g, " ").toLowerCase()}</Badge>;
+  const copy = KYC_COPY[status];
+  return (
+    <span title={copy.venueDetail}>
+      <Badge tone={copy.tone}>{copy.label}</Badge>
+    </span>
+  );
 }
 
 /**

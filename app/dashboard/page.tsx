@@ -5,6 +5,7 @@ import {
   Badge,
   Card,
   CardHeader,
+  EmptyState,
   ErrorNotice,
   KycBadge,
   PageHeader,
@@ -13,7 +14,9 @@ import {
   Td,
   Th,
 } from "@/components/admin/ui";
-import { listEntertainers, listQrCodes, listVenues } from "@/lib/api/dashboard";
+import { listEntertainers, listVenues } from "@/lib/api/dashboard";
+import { getVenueEntertainerEarnings, getVenueOverview } from "@/lib/api/insights";
+import { formatNaira } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -22,75 +25,115 @@ export const metadata: Metadata = { title: "Overview" };
 /**
  * Venue overview.
  *
- * HONESTY RULE: the backend exposes no transactions, payouts, or aggregate
- * totals endpoint (docs/api-audit.md §2). Money tiles therefore say "Not yet
- * available" rather than deriving a plausible figure from partial data. A
- * dashboard that quietly shows a wrong number is worse than one that shows
- * none — the entire pitch to venues is numbers they can trust.
- *
- * The counts below are real: they are the length of lists the API actually
- * returned.
+ * Every money figure comes from GET /venues/{id}/overview, computed by the
+ * backend over a window it defines (midnight Africa/Lagos to now). Nothing is
+ * summed here. If that call fails the tiles say so rather than showing a zero —
+ * on a money dashboard, "none tonight" and "we couldn't check" must not look
+ * the same.
  */
-export default async function OverviewPage() {
+export default async function OverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ venue?: string }>;
+}) {
   const { token } = await requireSession();
+  const { venue: venueParam } = await searchParams;
 
-  const [venues, entertainers, qrCodes] = await Promise.all([
-    listVenues(token).catch(() => null),
+  const venues = await listVenues(token).catch(() => null);
+  const selectedVenue = venues?.find((v) => v.id === venueParam) ?? venues?.[0] ?? null;
+
+  const [overview, earnings, entertainers] = await Promise.all([
+    selectedVenue ? getVenueOverview(token, selectedVenue.id) : Promise.resolve(null),
+    selectedVenue
+      ? getVenueEntertainerEarnings(token, selectedVenue.id)
+      : Promise.resolve(null),
     listEntertainers(token).catch(() => null),
-    listQrCodes(token).catch(() => null),
   ]);
 
-  const activeEntertainers = entertainers?.filter((e) => e.isActive) ?? null;
-  const activeQrCodes = qrCodes?.filter((q) => q.isActive) ?? null;
-  const unreachable = venues === null && entertainers === null && qrCodes === null;
+  if (venues === null) {
+    return (
+      <>
+        <PageHeader title="Tonight" />
+        <ErrorNotice message="Couldn't reach the Splitcore API. It may be waking up from a cold start — reload in a moment." />
+      </>
+    );
+  }
+
+  if (venues.length === 0) {
+    return (
+      <>
+        <PageHeader title="Tonight" />
+        <Card>
+          <EmptyState
+            title="No venues on this account"
+            detail="There's nothing to report on yet."
+          />
+        </Card>
+      </>
+    );
+  }
+
+  const kycById = new Map((entertainers ?? []).map((e) => [e.id, e]));
 
   return (
     <>
       <PageHeader
         title="Tonight"
-        description="Live counts come straight from the API. Money figures are held back until the backend exposes them."
+        description={
+          overview
+            ? `${overview.venueName} · since midnight (${formatTime(overview.windowFrom)})`
+            : selectedVenue?.name
+        }
       />
 
-      {unreachable ? (
+      {venues.length > 1 ? (
+        <nav className="mb-6 flex flex-wrap gap-2">
+          {venues.map((venue) => (
+            <Link
+              key={venue.id}
+              href={`/dashboard?venue=${venue.id}`}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                venue.id === selectedVenue?.id
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {venue.name}
+            </Link>
+          ))}
+        </nav>
+      ) : null}
+
+      {overview === null ? (
         <div className="mb-6">
-          <ErrorNotice message="Couldn't reach the Splitcore API. It may be waking up from cold start — reload in a moment." />
+          <ErrorNotice message="Tonight's figures couldn't be loaded, so they're left blank rather than shown as zero. Reload in a moment." />
         </div>
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           label="Total Tips"
-          unavailable="No aggregate-totals endpoint exists on the backend yet."
+          value={overview ? formatNaira(overview.totalTipsKobo) : undefined}
+          unavailable={overview ? undefined : "Couldn't be loaded just now."}
+          hint={overview ? "Successful tips tonight" : undefined}
         />
         <StatTile
           label="Transactions"
-          unavailable="No transactions endpoint exists on the backend yet."
+          value={overview ? String(overview.transactionCount) : undefined}
+          unavailable={overview ? undefined : "Couldn't be loaded just now."}
+          hint={overview ? "Successful tonight" : undefined}
         />
         <StatTile
           label="Entertainers"
-          value={activeEntertainers ? String(activeEntertainers.length) : "—"}
-          hint={
-            entertainers
-              ? `${entertainers.length} total · ${activeEntertainers?.length ?? 0} active`
-              : "Could not load"
-          }
+          value={overview ? String(overview.entertainerCount) : undefined}
+          unavailable={overview ? undefined : "Couldn't be loaded just now."}
+          hint={overview ? "Linked to this venue" : undefined}
         />
         <StatTile
           label="Pending Payouts"
-          unavailable="No payouts endpoint exists on the backend yet."
-        />
-      </div>
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <StatTile
-          label="Venues"
-          value={venues ? String(venues.length) : "—"}
-          hint={venues ? `${venues.filter((v) => v.isActive).length} active` : "Could not load"}
-        />
-        <StatTile
-          label="Active QR codes"
-          value={activeQrCodes ? String(activeQrCodes.length) : "—"}
-          hint={qrCodes ? `${qrCodes.length} generated in total` : "Could not load"}
+          value={overview ? formatNaira(overview.pendingPayoutsKobo) : undefined}
+          unavailable={overview ? undefined : "Couldn't be loaded just now."}
+          hint={overview ? "Owed, not yet sent" : undefined}
         />
       </div>
 
@@ -98,53 +141,60 @@ export default async function OverviewPage() {
         <Card>
           <CardHeader
             title="Entertainers"
-            description="Per-entertainer tonight / this week / total figures need the aggregates endpoint that doesn't exist yet."
+            description="Each entertainer's own share — tonight, this week, and all time."
           />
-          {entertainers && entertainers.length > 0 ? (
+          {earnings === null ? (
+            <div className="p-5">
+              <ErrorNotice message="Per-entertainer earnings couldn't be loaded." />
+            </div>
+          ) : earnings.length === 0 ? (
+            <EmptyState
+              title="No entertainers linked to this venue"
+              detail="Link one under Entertainers to start tracking their earnings."
+            />
+          ) : (
             <Table
               head={
                 <tr>
                   <Th>Stage name</Th>
                   <Th>KYC</Th>
-                  <Th>Status</Th>
-                  <Th>Venues</Th>
                   <Th>Tonight</Th>
+                  <Th>This week</Th>
+                  <Th>Total</Th>
                 </tr>
               }
             >
-              {entertainers.slice(0, 8).map((entertainer) => (
-                <tr key={entertainer.id}>
-                  <Td className="font-medium text-slate-900">{entertainer.stageName}</Td>
-                  <Td>
-                    <KycBadge status={entertainer.kycStatus} />
-                  </Td>
-                  <Td>
-                    <Badge tone={entertainer.isActive ? "positive" : "neutral"}>
-                      {entertainer.isActive ? "Active" : "Inactive"}
-                    </Badge>
-                  </Td>
-                  <Td className="tabular-nums">{entertainer.venueIds.length}</Td>
-                  <Td className="text-slate-400">Not yet available</Td>
-                </tr>
-              ))}
+              {earnings.map((row) => {
+                const entertainer = kycById.get(row.entertainerId);
+                return (
+                  <tr key={row.entertainerId}>
+                    <Td className="font-medium text-slate-900">{row.stageName}</Td>
+                    <Td>
+                      {entertainer ? (
+                        <KycBadge status={entertainer.kycStatus} />
+                      ) : (
+                        <Badge tone="neutral">Unknown</Badge>
+                      )}
+                    </Td>
+                    <Td className="tabular-nums">{formatNaira(row.tonightKobo)}</Td>
+                    <Td className="tabular-nums">{formatNaira(row.thisWeekKobo)}</Td>
+                    <Td className="tabular-nums">{formatNaira(row.totalKobo)}</Td>
+                  </tr>
+                );
+              })}
             </Table>
-          ) : (
-            <div className="px-6 py-10 text-center text-sm text-slate-500">
-              {entertainers ? (
-                <>
-                  No entertainers yet.{" "}
-                  <Link href="/dashboard/entertainers" className="font-medium text-slate-900 underline">
-                    Add one
-                  </Link>
-                  .
-                </>
-              ) : (
-                "Could not load entertainers."
-              )}
-            </div>
           )}
         </Card>
       </div>
     </>
   );
+}
+
+function formatTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-NG", {
+    timeStyle: "short",
+    timeZone: "Africa/Lagos",
+  }).format(date);
 }

@@ -681,3 +681,107 @@ you."* and is marked non-retryable, because retrying will not help.
    contract; it has never once run against a working database.
 4. No end-to-end payment through live Paystack; 410 Gone still untriggered; the guest tipping
    screen still unreviewed visually.
+
+---
+---
+
+# Re-audit — 2026-09-26 (fourth pass) — Phase 6/7 shipped ✅
+
+## A. The outage from the third pass is over
+
+The governance migration has been applied. Everything that was 500-ing now answers:
+
+| Endpoint | Was | Now |
+|---|---|---|
+| `GET /platform/settings` | 500 | **200** `{platformFeeBps: 500, splittableBps: 9500}` |
+| `GET /split-rules/venue/{id}` · `/active` | 500 | **200** |
+| `GET /entertainers` · `GET /qr-codes` | 500 | **200** |
+| `POST /payments/initialize` | 500 | **200** — real Paystack `authorizationUrl` |
+
+**Guests can tip again.** The split-rules dashboard switched itself from the "broken" state
+into full governance mode with no code change, which is what the capability probe was for.
+
+## B. Phase 6/7 endpoints — all live, all verified
+
+### Dashboard aggregates
+
+| Endpoint | Shape | Verified |
+|---|---|---|
+| `GET /venues/{id}/overview` | `{venueId, venueName, windowFrom, windowTo, totalTipsKobo, transactionCount, entertainerCount, pendingPayoutsKobo}` | ✅ real data |
+| `GET /venues/{id}/entertainer-earnings` | `[{entertainerId, stageName, tonightKobo, thisWeekKobo, totalKobo}]` | ✅ |
+| `GET /venues/{id}/transactions` | `{total, limit, offset, items[]}` | ✅ |
+| `GET /venues/{id}/payouts` | `{total, limit, offset, items[]}` | ✅ |
+| `GET /entertainers/{id}/overview` | `{…tonightKobo, thisWeekKobo, totalKobo, pendingPayoutsKobo, paidOutKobo}` | ✅ |
+| `GET /entertainers/{id}/transactions` · `/payouts` | same paginated envelope | ✅ |
+
+The window is **midnight Africa/Lagos to now**, defined by the backend. Entertainer figures are
+**their own share**, summed from ledger credits — not gross tips.
+
+> ⚠️ `limit` and `offset` are documented as optional, but omitting them makes the backend's
+> `ParseIntPipe` answer **400 "Validation failed (numeric string is expected)"**. The client
+> always sends both explicitly. Worth fixing backend-side; harmless here.
+
+> The paginated envelope has **no declared schema** in the OpenAPI document. The types mirror the
+> live response observed on 2026-09-26.
+
+### Entertainer access — a token link, not a password
+
+| Endpoint | Notes |
+|---|---|
+| `POST /entertainer-auth/login-links/{entertainerId}` | Venue/platform admin issues it. 30-minute expiry, **single use**, and issuing a new one invalidates any outstanding link. Returns `{loginUrl, token, expiresAt}` |
+| `POST /entertainer-auth/sessions` | **Public.** `{token}` → `{accessToken, entertainerId, stageName}`. JWT is `ENTERTAINER`-scoped, read-only, 12 hours |
+
+`loginUrl` is `{FRONTEND_URL}/entertainer/login/{token}` — hence that exact frontend route.
+
+Verified live end to end: issued a link, redeemed it (claims `role: "ENTERTAINER"`), then
+**replayed the same token and got 401** — single use confirmed.
+
+### KYC onboarding
+
+Every step answers the same `KycStatusResponseDto`, carrying a server-derived `nextStep`
+(`BANK_DETAILS → RESOLVE_ACCOUNT → CONFIRM_ACCOUNT → VERIFY_IDENTITY → DONE`). **The client never
+works out where someone is in the flow** — it renders whatever `nextStep` says.
+
+| Endpoint | Step |
+|---|---|
+| `POST /entertainers/{id}/kyc/bank-details` | 1. `{bankName, bankCode, accountNumber}`. Changing the account clears every later check |
+| `POST /entertainers/{id}/kyc/resolve-account` | 2. Asks the bank who owns it. Rejection → 400 and KYC `FAILED` |
+| `POST /entertainers/{id}/kyc/confirm-account` | 3. `{confirmedAccountName}` must match what the bank returned |
+| `POST /entertainers/{id}/kyc/verify-identity` | 4. `{documentType: BVN\|NIN, documentNumber}` — number never stored, logged or returned |
+| `POST /entertainers/{id}/kyc/review` | `PLATFORM_ADMIN` only. The exit from `REVIEW` |
+| `GET /entertainers/{id}/kyc/status` | Current state. Account number masked to last four |
+
+**Identity verification is gated.** Per the backend's own description, every entertainer lands in
+`REVIEW` while identity checks are unavailable on the connected Paystack account (it gates those
+APIs behind the CAC-registered "Registered Business" tier). The portal surfaces the backend's
+`failureReason` verbatim rather than spinning forever.
+
+### ⚠️ Gap: there is no bank-list endpoint
+
+`SubmitBankDetailsDto.bankCode` says it should be *"fetched from the provider's bank list, not
+guessed from the name"* — **but no such endpoint exists**. There is no `GET /banks`.
+
+The portal therefore asks the entertainer to type the code, with help text saying their venue can
+look it up. **No bank list is hardcoded**: codes change, and a wrong one sends someone's money to
+the wrong bank. A `GET /banks` proxy is the right fix and is backend work.
+
+## C. What was verified, against the live API
+
+- **Venue dashboard money tiles**: Total Tips ₦10,000 · Transactions 2 · Entertainers 1 ·
+  Pending Payouts ₦9,500 — each matching the raw endpoint response.
+- **Venue transactions and payouts**: real references, real statuses, pagination.
+- **Entertainer portal**: signed in with a genuinely redeemed link and rendered the real
+  dashboard — tiles, two real tips, an honestly empty payouts list, and KYC showing `VERIFIED` /
+  `DONE` with `GTBank ******6789`.
+- **Entertainers roster**: real KYC badges across three states (`Verified`, `Manual review`,
+  `Not started`) and a working sign-in-link action.
+- **Split rules**: now renders "Propose a split" — governance mode, reached with no code change.
+
+## D. Still open
+
+1. **`GET /banks`** — see the gap above.
+2. **`limit`/`offset` should genuinely be optional** on the four paginated endpoints.
+3. Deploys still don't run migrations. `prisma migrate deploy` belongs in a Render pre-deploy
+   command, or this recurs on the next schema change.
+4. No end-to-end payment completed through Paystack checkout; 410 Gone still untriggered; the
+   guest tipping screen still not visually reviewed.
