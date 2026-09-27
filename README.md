@@ -85,6 +85,9 @@ what was deployed.
 | Transaction history + payouts tables (venue) | ✅ Real, paginated |
 | Entertainer portal: sign-in link, own dashboard, payout onboarding | ✅ Real |
 | Venue-admin view of entertainer KYC status | ✅ Real, read-only |
+| Bank picker (live `GET /banks`, no code ever typed) | ✅ Real, both surfaces |
+| Venue payout-account onboarding | ✅ Real |
+| Venue's own payout history, separate from entertainers' | ✅ Real |
 | Platform-admin cross-venue management | ✅ Real — gated on the `role` claim, verified with two live accounts |
 | Split rules: platform fee locked, linked venue/entertainer shares | ✅ Real |
 | Entertainer approval: propose → consent link → accept/reject | ✅ Built — **switches on by itself** once the backend ships (see below) |
@@ -114,9 +117,27 @@ returned** → identity → done. Which step shows is decided entirely by the ba
 `nextStep`; the client never works that out for itself. The confirm step is a real fraud
 checkpoint and is never skipped or auto-accepted.
 
-> **Known gap:** `bankCode` has no source. The API documents it as coming from the provider's
-> bank list, but exposes no `GET /banks`. The portal asks for it as a typed field rather than
-> shipping a hardcoded list — codes change, and a wrong one sends money to the wrong bank.
+Bank details are entered through a **searchable picker backed by the live `GET /banks` list**
+(263 banks). The person picks a name; the provider's code rides along in a hidden input and is
+never shown or typed. No bank list is ever hardcoded — codes change, and a wrong one sends
+money to the wrong institution. If the list can't be loaded the field says so, rather than
+appearing as an empty dropdown.
+
+---
+
+## Two pools of money
+
+A venue's own share and what its entertainers are owed come from **separate endpoints**
+(`/venues/{id}/own-payouts` and `/venues/{id}/payouts`) and are rendered as **separate,
+visually distinct sections** — never one table. "₦4,750 to DJ Neptune" and "₦4,750 to the
+venue" read identically at a glance and mean completely different things to a reconciliation.
+
+The venue's payout account has its own onboarding, mirroring the entertainer flow but without
+an identity step: bank details → resolve → **confirm the name the bank returned** → done.
+
+> The overview's `pendingPayoutsKobo` covers **both** pools, per the API's own description, so
+> it's labelled that way and no venue-only pending balance is shown. Summing one page of
+> queued rows to fill that gap would be a client-side aggregate dressed as a balance.
 
 ---
 
@@ -218,7 +239,8 @@ app/
                         One-time sign-in link landing
   login/                Venue admin sign-in
   dashboard/            Overview, QR codes, entertainers, split rules,
-                        venues (platform admin only), (transactions, payouts)
+                        payout account, transactions, payouts,
+                        venues (platform admin only)
   api/
     qr/[token]/png/     Scannable PNG encoding this site's /t/ URL
     payments/[reference]/status/   Server-side proxy the confirmation screen polls

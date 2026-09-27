@@ -32,18 +32,27 @@ export function VenuePicker({
   );
 }
 
+/**
+ * `offsetParam` lets two independent lists paginate on one page without
+ * fighting over a single `offset` — the payouts screen shows the venue's own
+ * payouts and its entertainers' side by side.
+ */
 export function Pager({
   basePath,
   venueId,
   offset,
   limit,
   total,
+  offsetParam = "offset",
+  extraParams = "",
 }: {
   basePath: string;
   venueId: string;
   offset: number;
   limit: number;
   total: number;
+  offsetParam?: string;
+  extraParams?: string;
 }) {
   const from = total === 0 ? 0 : offset + 1;
   const to = Math.min(offset + limit, total);
@@ -57,13 +66,13 @@ export function Pager({
       </p>
       <div className="flex gap-2">
         <PagerLink
-          href={`${basePath}?venue=${venueId}&offset=${prev}`}
+          href={`${basePath}?venue=${venueId}&${offsetParam}=${prev}${extraParams}`}
           disabled={offset === 0}
         >
           Previous
         </PagerLink>
         <PagerLink
-          href={`${basePath}?venue=${venueId}&offset=${next}`}
+          href={`${basePath}?venue=${venueId}&${offsetParam}=${next}${extraParams}`}
           disabled={next >= total}
         >
           Next

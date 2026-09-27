@@ -15,11 +15,18 @@ import type { IssuedLoginLink, KycStatusResponse } from "./types";
 export const getKycStatus = (token: string, entertainerId: string) =>
   apiFetch<KycStatusResponse>(`/entertainers/${entertainerId}/kyc/status`, { token });
 
-/** Step 1. Changing the account clears any previous resolution and confirmation. */
+/**
+ * Step 1. Changing the account clears any previous resolution and confirmation.
+ *
+ * Sends `bankCode`, not `bankName`: the backend validates the code against the
+ * live list and rejects an ambiguous name outright ("First Bank" matches more
+ * than one). The picker already knows the exact code, so there is nothing to
+ * gain by making the server guess.
+ */
 export const submitBankDetails = (
   token: string,
   entertainerId: string,
-  body: { bankName: string; bankCode: string; accountNumber: string },
+  body: { bankCode: string; accountNumber: string },
 ) =>
   apiFetch<KycStatusResponse>(`/entertainers/${entertainerId}/kyc/bank-details`, {
     method: "POST",

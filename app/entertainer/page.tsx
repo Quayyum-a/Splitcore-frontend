@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { getBanks } from "@/lib/api/banks";
 import { getKycStatus } from "@/lib/api/kyc";
 import {
   getEntertainerOverview,
@@ -40,8 +41,9 @@ export default async function EntertainerPage() {
 
   const { token, entertainerId, stageName } = session;
 
-  const [kyc, overview, transactions, payouts] = await Promise.all([
+  const [kyc, banks, overview, transactions, payouts] = await Promise.all([
     getKycStatus(token, entertainerId).catch(() => null),
+    getBanks(token),
     getEntertainerOverview(token, entertainerId),
     getEntertainerTransactions(token, entertainerId, { limit: 20 }),
     getEntertainerPayouts(token, entertainerId, { limit: 20 }),
@@ -78,7 +80,7 @@ export default async function EntertainerPage() {
 
       {kyc ? (
         <div className="mt-6">
-          <Onboarding kyc={kyc} />
+          <Onboarding kyc={kyc} banks={banks} />
         </div>
       ) : (
         <p className="mt-6 rounded-2xl border border-ink-700 bg-ink-900 px-4 py-3.5 text-sm leading-relaxed text-ink-400">

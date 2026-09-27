@@ -133,7 +133,7 @@ export default async function OverviewPage({
           label="Pending Payouts"
           value={overview ? formatNaira(overview.pendingPayoutsKobo) : undefined}
           unavailable={overview ? undefined : "Couldn't be loaded just now."}
-          hint={overview ? "Owed, not yet sent" : undefined}
+          hint={overview ? "Venue + entertainers, owed now" : undefined}
         />
       </div>
 

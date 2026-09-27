@@ -41,19 +41,19 @@ export async function submitBankDetailsAction(
   _previous: KycActionState,
   formData: FormData,
 ): Promise<KycActionState> {
-  const bankName = String(formData.get("bankName") ?? "").trim();
   const bankCode = String(formData.get("bankCode") ?? "").trim();
   const accountNumber = String(formData.get("accountNumber") ?? "").trim();
 
-  if (!bankName) return { error: "Enter your bank's name." };
-  if (!/^\d{3,6}$/.test(bankCode)) return { error: "Enter your bank's code (3 to 6 digits)." };
+  // The code comes from the picker, so an empty one means no bank was chosen
+  // rather than a bad one typed.
+  if (!bankCode) return { error: "Choose your bank from the list." };
   if (!/^\d{10}$/.test(accountNumber)) {
     return { error: "A Nigerian account number is exactly 10 digits." };
   }
 
   try {
     const { token, entertainerId } = await requireEntertainer();
-    await submitBankDetails(token, entertainerId, { bankName, bankCode, accountNumber });
+    await submitBankDetails(token, entertainerId, { bankCode, accountNumber });
     revalidatePath("/entertainer");
     return { error: null };
   } catch (error) {
