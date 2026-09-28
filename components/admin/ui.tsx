@@ -236,3 +236,53 @@ export function SplitStatusBadge({
       return <Badge tone="neutral">Superseded</Badge>;
   }
 }
+
+/**
+ * The venue payout account's real state, in plain words.
+ *
+ * Derived from the backend's own `nextStep` rather than from whichever fields
+ * happen to be populated — same rule as everywhere else: one place decides
+ * where something is in a flow, and it isn't the client.
+ */
+export function payoutAccountState(account: {
+  nextStep: string;
+  payoutsEnabled: boolean;
+}): { label: string; tone: "positive" | "neutral" | "warning"; detail: string } {
+  switch (account.nextStep) {
+    case "BANK_DETAILS":
+      return {
+        label: "Not set up",
+        tone: "neutral",
+        detail: "Add a payout account to receive your share.",
+      };
+    case "RESOLVE_ACCOUNT":
+      return {
+        label: "Awaiting bank check",
+        tone: "warning",
+        detail: "Bank details saved. Ask the bank to confirm who owns the account.",
+      };
+    case "CONFIRM_ACCOUNT":
+      return {
+        label: "Awaiting confirmation",
+        tone: "warning",
+        detail: "The bank has answered. Check the name and confirm it's you.",
+      };
+    default:
+      return account.payoutsEnabled
+        ? { label: "Active", tone: "positive", detail: "Your share is paid to this account." }
+        : {
+            label: "Confirmed",
+            tone: "positive",
+            detail: "Confirmed. Payouts switch on once the account is fully cleared.",
+          };
+  }
+}
+
+export function PayoutAccountBadge({
+  account,
+}: {
+  account: { nextStep: string; payoutsEnabled: boolean };
+}) {
+  const state = payoutAccountState(account);
+  return <Badge tone={state.tone}>{state.label}</Badge>;
+}

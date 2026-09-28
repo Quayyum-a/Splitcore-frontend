@@ -30,6 +30,7 @@ export default async function DashboardLayout({
     { href: "/dashboard/qr-codes", label: "QR codes" },
     { href: "/dashboard/entertainers", label: "Entertainers" },
     { href: "/dashboard/split-rules", label: "Split rules" },
+    { href: "/dashboard/payout-account", label: "Payout account" },
     { href: "/dashboard/transactions", label: "Transactions" },
     { href: "/dashboard/payouts", label: "Payouts" },
   ];

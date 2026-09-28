@@ -3,8 +3,9 @@
 import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 
+import { BankPicker } from "@/components/BankPicker";
 import { KYC_COPY } from "@/lib/kyc-copy";
-import type { KycNextStep, KycStatusResponse } from "@/lib/api/types";
+import type { Bank, KycNextStep, KycStatusResponse } from "@/lib/api/types";
 
 import {
   confirmAccountAction,
@@ -31,7 +32,7 @@ const STEPS: { key: KycNextStep; label: string }[] = [
  * never works out where someone is in the sequence — there is real money at the
  * end of it, and two places deciding that is one too many.
  */
-export function Onboarding({ kyc }: { kyc: KycStatusResponse }) {
+export function Onboarding({ kyc, banks }: { kyc: KycStatusResponse; banks: Bank[] | null }) {
   const [editingBank, setEditingBank] = useState(false);
   const copy = KYC_COPY[kyc.status];
   const stepIndex = STEPS.findIndex((s) => s.key === kyc.nextStep);
@@ -60,6 +61,7 @@ export function Onboarding({ kyc }: { kyc: KycStatusResponse }) {
         {editingBank || kyc.nextStep === "BANK_DETAILS" ? (
           <BankDetailsStep
             current={kyc}
+            banks={banks}
             onCancel={editingBank ? () => setEditingBank(false) : undefined}
           />
         ) : kyc.nextStep === "RESOLVE_ACCOUNT" ? (
@@ -106,9 +108,11 @@ function StepRail({ current }: { current: number }) {
 
 function BankDetailsStep({
   current,
+  banks,
   onCancel,
 }: {
   current: KycStatusResponse;
+  banks: Bank[] | null;
   onCancel?: () => void;
 }) {
   const [state, formAction] = useActionState(submitBankDetailsAction, INITIAL);
@@ -120,19 +124,11 @@ function BankDetailsStep({
         account can&rsquo;t be swapped after it&rsquo;s been approved.
       </p>
 
-      <Field
-        name="bankName"
-        label="Bank"
-        placeholder="GTBank"
-        defaultValue={current.bankName ?? ""}
-      />
-      <Field
-        name="bankCode"
-        label="Bank code"
-        placeholder="058"
-        inputMode="numeric"
-        defaultValue={current.bankCode ?? ""}
-        hint="The short code your bank uses with Paystack. Your venue can look this up if you're unsure."
+      <BankPicker
+        banks={banks}
+        tone="dark"
+        defaultBankName={current.bankName}
+        defaultBankCode={current.bankCode}
       />
       <Field
         name="accountNumber"
@@ -146,7 +142,7 @@ function BankDetailsStep({
       {state.error ? <FormError>{state.error}</FormError> : null}
 
       <div className="flex gap-2.5 pt-1">
-        <Primary label="Save and continue" pendingLabel="Saving…" />
+        <Primary label="Save and continue" pendingLabel="Saving…" disabled={banks === null} />
         {onCancel ? (
           <button
             type="button"
@@ -384,16 +380,18 @@ function Primary({
   label,
   pendingLabel,
   full = false,
+  disabled = false,
 }: {
   label: string;
   pendingLabel: string;
   full?: boolean;
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
-      disabled={pending}
+      disabled={disabled || pending}
       className={`h-[3.25rem] rounded-2xl bg-gold px-5 text-base font-semibold text-ink-950 disabled:bg-ink-800 disabled:text-ink-600 ${
         full ? "w-full" : "flex-1"
       }`}

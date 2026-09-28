@@ -344,3 +344,46 @@ export interface EntertainerSession {
   entertainerId: string;
   stageName: string;
 }
+
+/* ------------------------------------------------- banks & venue payouts */
+
+/**
+ * GET /banks — the provider's own list, cached 24h, filtered to banks that are
+ * active and can actually receive a transfer.
+ *
+ * Never hardcode this. Codes change, banks merge, and a wrong code sends
+ * someone's money to the wrong place.
+ */
+export interface Bank {
+  name: string;
+  /** Send this rather than the name: it is unambiguous and validated. */
+  code: string;
+}
+
+/**
+ * GET /venues/{venueId}/payout-account/status.
+ *
+ * Deliberately the same shape as the entertainer KYC status, minus the
+ * identity fields — the backend says as much, so one component drives both.
+ */
+export const VENUE_PAYOUT_STEPS = [
+  "BANK_DETAILS",
+  "RESOLVE_ACCOUNT",
+  "CONFIRM_ACCOUNT",
+  "DONE",
+] as const;
+export type VenuePayoutStep = (typeof VENUE_PAYOUT_STEPS)[number];
+
+export interface VenuePayoutAccount {
+  venueId: string;
+  venueName: string;
+  nextStep: VenuePayoutStep;
+  bankName: string | null;
+  bankCode: string | null;
+  accountNumberMasked: string | null;
+  resolvedAccountName: string | null;
+  accountResolvedAt: string | null;
+  accountConfirmedAt: string | null;
+  /** Whether the venue's own VENUE_PAYABLE payouts will be attempted. */
+  payoutsEnabled: boolean;
+}

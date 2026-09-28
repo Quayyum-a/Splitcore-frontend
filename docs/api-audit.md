@@ -785,3 +785,112 @@ the wrong bank. A `GET /banks` proxy is the right fix and is backend work.
    command, or this recurs on the next schema change.
 4. No end-to-end payment completed through Paystack checkout; 410 Gone still untriggered; the
    guest tipping screen still not visually reviewed.
+
+---
+---
+
+# Re-audit — 2026-09-27 — bank list and venue payout accounts
+
+All six new endpoints are live and were exercised against the real API before anything was built.
+
+## A. `GET /banks`
+
+**263 banks**, shape `{ name, code }`, sorted by name. The provider's own list, cached 24h
+server-side and filtered to banks that are active **and can actually receive a transfer** —
+offering one that can't only moves the failure later.
+
+The frontend caches it for an hour (`revalidate: 3600`): same answer for every user, and it isn't
+money data. A failure returns `null`, never `[]` — an empty dropdown and a dropdown that failed to
+load look identical to someone trying to get paid, and only one is worth waiting out.
+
+## B. `SubmitBankDetailsDto` reworked — and a deliberate deviation from the brief
+
+```jsonc
+{ "bankName": "GTBank",  // optional — resolved against GET /banks
+  "bankCode": "058",     // optional — "Preferred over bankName", validated against the live list
+  "accountNumber": "0123456789" }  // the only required field
+```
+
+> **Judgment call:** the brief said to submit `bankName` + `accountNumber`. **This submits
+> `bankCode` + `accountNumber` instead.** The backend's own DTO says the code is *"preferred over
+> bankName"* and that a name matching more than one bank is **rejected** — `"First Bank"` and
+> `"First Bank of Nigeria"` being the documented example. Since the picker already holds the exact
+> code, sending the name would ask the server to re-guess something we know, and invite a 400 on
+> ambiguous names. The intent of the brief — *"the code travels with it invisibly and is never
+> shown or typed"* — is fully met: the code lives in a hidden input and no user ever sees it.
+
+## C. Venue payout account
+
+Four steps, no identity check. `VenuePayoutAccountResponseDto` is **deliberately the same shape as
+the entertainer KYC status** minus the identity fields — the backend says so explicitly — so one
+stepper pattern drives both and they can't drift apart.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/venues/{id}/payout-account/status` | `nextStep` ∈ `BANK_DETAILS → RESOLVE_ACCOUNT → CONFIRM_ACCOUNT → DONE`, derived server-side |
+| POST | `/venues/{id}/payout-account/bank-details` | Changing the account clears resolution + confirmation |
+| POST | `/venues/{id}/payout-account/resolve-account` | Returns the holder name **as the bank reports it** |
+| POST | `/venues/{id}/payout-account/confirm-account` | Must match what the bank returned. On confirm, the venue's `VENUE_PAYABLE` balance becomes payable |
+
+Live on the demo venue: `nextStep: "BANK_DETAILS"`, `payoutsEnabled: false` — genuinely not set up,
+which is what the UI says.
+
+## D. The two payout pools are now genuinely separate ✅
+
+`GET /venues/{id}/payouts` used to return the venue's own rows. It no longer does:
+
+```
+/venues/{id}/payouts      → total 0, ids []
+/venues/{id}/own-payouts  → total 2, ids [009472ad…, 94187a66…]
+overlap                   → 0 shared ids
+```
+
+`entertainerName` is always `null` on `own-payouts`, because the recipient is the venue itself.
+
+## E. ⚠️ There is no venue-only pending balance
+
+`VenueOverviewResponseDto.pendingPayoutsKobo` is documented as *"Includes both the venue's own
+share and its entertainers'."* So it is **not** the venue's own pending figure, and nothing exposes
+that separately.
+
+Consequences, both deliberate:
+
+1. The overview tile hint now reads **"Venue + entertainers, owed now"** rather than implying it's
+   one pool.
+2. The venue payout section shows its **account state and real payout history**, and **no pending
+   balance tile** — summing the QUEUED rows on one page of a paginated list would be a
+   client-side aggregate presented as a balance, which is the one thing this project never does.
+
+A `pendingOwnPayoutsKobo` on the overview would close this cleanly.
+
+## F. KYC role lockdown
+
+`POST /entertainers/{id}/kyc/confirm-account` is now **ENTERTAINER only** — a venue admin gets
+403. Correct: that step is what makes a payout destination trusted, and a venue confirming on a
+performer's behalf would hollow it out. No frontend change needed; entertainer onboarding already
+runs under the entertainer's own session.
+
+## G. What was verified live
+
+- **Bank picker**: 262 banks serialised to the client on both surfaces, real names
+  (Guaranty Trust Bank, Zenith Bank, Access Bank, 5TT MFB), **no visible bank-code field anywhere**,
+  and `role="combobox"` / `aria-expanded` / `aria-controls` / `aria-autocomplete="list"` wired.
+- **Venue payout account page**: renders "Not set up", the four-step rail, and the picker.
+- **Payouts page**: "Your venue's payout" in its own dark-headed, heavier-bordered section with an
+  "Add your payout account to receive your share" call to action; "Entertainer payouts" separate
+  and honestly empty.
+- **Entertainer portal**: `REVIEW` renders as **"Manual review"**, never "Verified", and the
+  blocked-identity reason is surfaced **verbatim** from the API.
+
+> Not verified by rendering: the **dark** bank picker at the `BANK_DETAILS` step. Only one
+> entertainer (DJ Neptune) is active, and they are past that step at `REVIEW`/`VERIFY_IDENTITY`;
+> the other four are deactivated, and issuing a login link for an inactive entertainer answers
+> 401 "This entertainer is not active". The same component is verified rendering on the light
+> surface, and the bank list is confirmed reaching the entertainer client.
+
+## H. Still open
+
+1. **`pendingOwnPayoutsKobo`** — see §E.
+2. `limit`/`offset` still 400 when omitted on the paginated endpoints.
+3. Deploys still don't run migrations.
+4. No end-to-end payment through Paystack checkout; 410 Gone still untriggered.
